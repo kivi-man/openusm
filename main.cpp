@@ -3838,21 +3838,89 @@ void render_current_debug_menu() {
 
 // -----------------------------------------------------------------------
 // Heap crash guard – fixes recurring 0xC0000005 crashes in ntdll RtlFreeHeap
-// caused by the game calling free() with a null or corrupted heap pointer.
-// We walk USM.exe's IAT, find the MSVCR71.dll::free entry, and replace it
-// with a wrapper that validates the pointer first.
+// caused by the game calling free() / delete with corrupt or invalid pointers.
+// Any access violation during free/delete is caught by the Vectored Exception
+// Handler, the caller registers are restored, and the call returns safely.
 // -----------------------------------------------------------------------
-static void (__cdecl *s_real_msvcr71_free)(void *) = nullptr;
+extern "C" {
+    void (__cdecl *s_real_msvcr71_free)(void *) = nullptr;
+    volatile int s_in_free_guard = 0;
+    volatile DWORD s_free_guard_thread = 0;
+    void * volatile s_current_free_ptr = nullptr;
 
-static void __cdecl safe_free_guard(void *ptr) {
-    // Win32 reserves the lower 64 KB; any pointer below that is invalid.
-    // Passing such a pointer to RtlFreeHeap causes the observed crash.
-    if (!ptr || (uintptr_t)ptr < 0x10000u) {
-        sp_log("[HeapGuard] Skipped bad free(%p)", ptr);
-        return;
+    DWORD s_safe_esp = 0;
+    DWORD s_safe_ebp = 0;
+    DWORD s_safe_ebx = 0;
+    DWORD s_safe_esi = 0;
+    DWORD s_safe_edi = 0;
+
+    void safe_free_recovery() {
+        sp_log("[HeapGuard] VEH caught & prevented heap crash on free(%p). Skipping corrupted block.", s_current_free_ptr);
     }
-    if (s_real_msvcr71_free)
-        s_real_msvcr71_free(ptr);
+
+    LONG WINAPI safe_free_veh_handler(PEXCEPTION_POINTERS pExc) {
+        if (s_in_free_guard &&
+            GetCurrentThreadId() == s_free_guard_thread &&
+            (pExc->ExceptionRecord->ExceptionCode == STATUS_ACCESS_VIOLATION ||
+             pExc->ExceptionRecord->ExceptionCode == 0xC0000374u /* STATUS_HEAP_CORRUPTION */))
+        {
+            sp_log("[HeapGuard] VEH intercepted crash 0x%08X in free(%p) at EIP=0x%08X (accessing 0x%08X)! Recovering...",
+                   (unsigned)pExc->ExceptionRecord->ExceptionCode,
+                   s_current_free_ptr,
+                   (unsigned)pExc->ContextRecord->Eip,
+                   (unsigned)(pExc->ExceptionRecord->NumberParameters > 1 ? pExc->ExceptionRecord->ExceptionInformation[1] : 0));
+
+            s_in_free_guard = 0;
+
+            pExc->ContextRecord->Eip = (DWORD)(uintptr_t)safe_free_recovery;
+            pExc->ContextRecord->Esp = s_safe_esp;
+            pExc->ContextRecord->Ebp = s_safe_ebp;
+            pExc->ContextRecord->Ebx = s_safe_ebx;
+            pExc->ContextRecord->Esi = s_safe_esi;
+            pExc->ContextRecord->Edi = s_safe_edi;
+
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    __attribute__((naked, used)) void safe_free_guard(void *ptr) {
+        __asm__ volatile (
+            "mov eax, [esp+4]\n\t"
+            "test eax, eax\n\t"
+            "jz 1f\n\t"
+            "cmp eax, 0x10000\n\t"
+            "jb 1f\n\t"
+
+            "mov [_s_current_free_ptr], eax\n\t"
+            "mov edx, esp\n\t"
+            "mov [_s_safe_esp], edx\n\t"
+            "mov [_s_safe_ebp], ebp\n\t"
+            "mov [_s_safe_ebx], ebx\n\t"
+            "mov [_s_safe_esi], esi\n\t"
+            "mov [_s_safe_edi], edi\n\t"
+
+            "mov edx, fs:[0x24]\n\t"
+            "mov [_s_free_guard_thread], edx\n\t"
+            "mov dword ptr [_s_in_free_guard], 1\n\t"
+
+            "push eax\n\t"
+            "mov eax, [_s_real_msvcr71_free]\n\t"
+            "test eax, eax\n\t"
+            "jz 2f\n\t"
+            "call eax\n\t"
+        "2:\n\t"
+            "add esp, 4\n\t"
+            "mov dword ptr [_s_in_free_guard], 0\n\t"
+        "1:\n\t"
+            "ret\n\t"
+            :
+            :
+            : "memory"
+        );
+    }
+
+
 }
 
 static void install_heap_crash_guard() {
@@ -3862,14 +3930,20 @@ static void install_heap_crash_guard() {
         return;
     }
 
-    s_real_msvcr71_free = (decltype(s_real_msvcr71_free))
-                          GetProcAddress(msvcr, "free");
+    s_real_msvcr71_free = (decltype(s_real_msvcr71_free))GetProcAddress(msvcr, "free");
+    void *real_delete = (void *)GetProcAddress(msvcr, "??3@YAXPAX@Z");
+    void *real_aligned_free = (void *)GetProcAddress(msvcr, "_aligned_free");
+
     if (!s_real_msvcr71_free) {
         sp_log("[HeapGuard] free() not found in MSVCR71.dll – skip");
         return;
     }
 
-    // Walk the IAT of USM.exe to find the thunk that resolves to MSVCR71::free
+    // Register top-priority VEH to catch and recover from corrupt heap chunk crashes
+    AddVectoredExceptionHandler(1, safe_free_veh_handler);
+    sp_log("[HeapGuard] Registered VEH exception handler");
+
+    // Walk the IAT of USM.exe to find all thunks that resolve to free, delete, or aligned_free
     HMODULE usm = GetModuleHandleA("USM.exe");
     if (!usm) return;
 
@@ -3885,38 +3959,40 @@ static void install_heap_crash_guard() {
 
         auto *thunk = (IMAGE_THUNK_DATA *)((uint8_t *)usm + desc->FirstThunk);
         for (; thunk->u1.Function; ++thunk) {
-            if ((void *)(uintptr_t)thunk->u1.Function == (void *)s_real_msvcr71_free) {
+            void *target = (void *)(uintptr_t)thunk->u1.Function;
+            if (target == (void *)s_real_msvcr71_free ||
+                target == real_delete ||
+                target == real_aligned_free)
+            {
                 DWORD old;
-                VirtualProtect(&thunk->u1.Function, sizeof(DWORD),
-                               PAGE_READWRITE, &old);
+                VirtualProtect(&thunk->u1.Function, sizeof(DWORD), PAGE_READWRITE, &old);
                 thunk->u1.Function = (DWORD)(uintptr_t)safe_free_guard;
                 VirtualProtect(&thunk->u1.Function, sizeof(DWORD), old, &old);
                 ++patched;
-                sp_log("[HeapGuard] Patched IAT free() thunk at %p → safe_free_guard",
-                       &thunk->u1.Function);
-                // No break: patch ALL thunks pointing to free() in this descriptor
+                sp_log("[HeapGuard] Patched IAT thunk at %p (target %p) → safe_free_guard",
+                       &thunk->u1.Function, target);
             }
         }
-        // No break: walk ALL MSVCR71 import descriptors (there may be more than one)
     }
 
-    // Also directly verify and patch the known import stub slot used by the crash path
-    // (0x0086F2D4 feeds the JMP thunk at 0x0082207C called from 0x00504BA3)
-    static const DWORD s_known_slots[] = { 0x0086F2D4u, 0x0086F35Cu, 0u };
+    // Unconditionally patch known IAT slots in USM.exe:
+    // 0x0086F2D4: ??3@YAXPAX@Z (operator delete - used by std::list::clear at 0x00504BA3)
+    // 0x0086F35C: free
+    // 0x0086F328: _aligned_free
+    static const DWORD s_known_slots[] = { 0x0086F2D4u, 0x0086F35Cu, 0x0086F328u, 0u };
     for (int k = 0; s_known_slots[k]; ++k) {
         DWORD *slot = (DWORD *)s_known_slots[k];
-        if (*slot == (DWORD)(uintptr_t)s_real_msvcr71_free) {
-            DWORD old;
-            VirtualProtect(slot, sizeof(DWORD), PAGE_READWRITE, &old);
-            *slot = (DWORD)(uintptr_t)safe_free_guard;
-            VirtualProtect(slot, sizeof(DWORD), old, &old);
-            ++patched;
-            sp_log("[HeapGuard] Patched known slot 0x%08X → safe_free_guard", s_known_slots[k]);
-        }
+        DWORD old;
+        VirtualProtect(slot, sizeof(DWORD), PAGE_READWRITE, &old);
+        *slot = (DWORD)(uintptr_t)safe_free_guard;
+        VirtualProtect(slot, sizeof(DWORD), old, &old);
+        ++patched;
+        sp_log("[HeapGuard] Patched known slot 0x%08X → safe_free_guard", s_known_slots[k]);
     }
 
-    sp_log("[HeapGuard] IAT patch complete: %d thunk(s) redirected", patched);
+    sp_log("[HeapGuard] IAT patch complete: %d thunk(s) redirected with VEH recovery", patched);
 }
+
 
 void debug_nglListEndScene_hook() {
 
