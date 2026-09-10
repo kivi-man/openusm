@@ -547,7 +547,7 @@ void panel_component_base::capture(panel_component::render_info &a2)
 
 void __fastcall sub_742C50(void *self, int, comic_panels::panel_component_base *a2)
 {
-    sp_log("0x%08X", a2->m_vtbl);
+    // sp_log("0x%08X", a2->m_vtbl);
 
     THISCALL(0x00742C50, self, a2);
 }
@@ -594,4 +594,40 @@ void comic_panels_patch()
     }
 
     REDIRECT(0x00743453, sub_742C50);
+
+    {
+        // Replace the original 256x256 freeze-frame render target creator with one
+        // that matches the actual display resolution. We switch from the SWIZZLED
+        // format (0x1101, requires power-of-2 dimensions) to the LINEAR format
+        // (0x1201) so that arbitrary resolutions like 1920x1080 are accepted.
+        auto hook_create_comic_panel_targets = [](int width, int height) {
+            struct {
+                int m_width;
+                int m_height;
+            } *v1 = bit_cast<decltype(v1)>(0x00972688);
+
+            // Use LINEAR format (same as nglFrontBufferTex) - works at any resolution
+            uint32_t fmt = 0x1201;
+
+            if (v1 != nullptr && v1->m_width > 0 && v1->m_height > 0) {
+                width  = v1->m_width;
+                height = v1->m_height;
+            }
+
+            sp_log("[ComicPanels] Freeze-frame render targets: %dx%d (fmt=0x%X)", width, height, fmt);
+
+            static Var<nglTexture *[2]> dword_975A10{0x00975A10};
+            for (int i = 0; i < 2; ++i) {
+                auto *tex = nglCreateTexture(fmt, width, height, 0, 1);
+                if (tex != nullptr) {
+                    tex->field_34 |= 2;
+                    dword_975A10()[i] = tex;
+                }
+            }
+        };
+
+        void (*pfn)(int, int) = hook_create_comic_panel_targets;
+        SET_JUMP(0x00781980, pfn);
+        REDIRECT(0x0076E645, pfn);
+    }
 }

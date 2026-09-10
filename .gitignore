@@ -1,35 +1,65 @@
+﻿# Build output
 build/
-.vs/
-
-#Ignore thumbnails created by Windows
-Thumbs.db
-#Ignore files built by Visual Studio
-*.obj
-*.exe
-*.pdb
-*.user
-*.aps
-*.pch
-*.vspscc
-*_i.c
-*_p.c
-*.ncb
-*.suo
-*.tlb
-*.tlh
-*.bak
-*.cache
-*.ilk
-*.log
-[Bb]in
-[Dd]ebug*/
+*.dll
 *.lib
-*.sbr
-obj/
-[Rr]elease*/
-_ReSharper*/
-[Tt]est[Rr]esult*
+*.a
+*.o
+*.obj
+*.pdb
+*.exp
+*.map
+*.ilk
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+
+# Game content - copyrighted, do not commit
+audio_transcripts.json
+data/
+*.usm
+
+# Binary analysis / reverse engineering artifacts
+*.bin
+*.asi
+
+# Compiled executables and distributions
+*.exe
+dist/
+
+# Personal notes and language-specific docs
+*.md
+!README.md
+
+# Video / media captures
+*.mkv
+*.mp4
+*.avi
+
+# Python build artifacts
+__pycache__/
+*.spec
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# IDE / editor
 .vs/
+.vscode/
+*.user
+*.suo
 .idea/
-#Nuget packages folder
-packages/
+*.swp
+*~
+
+# Logs
+*.log
+
+# Third party build artifacts
+include/assimp/
+third_party/glm/

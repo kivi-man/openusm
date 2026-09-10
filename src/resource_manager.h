@@ -146,3 +146,4 @@ extern _std::vector<resource_pack_slot *> & resource_context_stack;
 
 extern void resource_manager_patch();
 extern void resource_manager_xbpack_patch();
+extern void resource_streaming_expansion_patch();

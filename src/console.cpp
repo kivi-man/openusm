@@ -776,14 +776,19 @@ void terrain_types_manager_create_inst()
 {
     CDECL_CALL(0x005C54B0);
 
-    g_console = new Console {};
+    if (g_console == nullptr) {
+        g_console = new Console {};
+    }
 }
 
 void terrain_types_manager_delete_inst()
 {
     CDECL_CALL(0x005BA680);
 
-    delete g_console;
+    if (g_console != nullptr) {
+        delete g_console;
+        g_console = nullptr;
+    }
 }
 
 void __fastcall FEManager_Update(void *self, void *edx, Float a2)
@@ -791,14 +796,24 @@ void __fastcall FEManager_Update(void *self, void *edx, Float a2)
     void (__fastcall *func)(void *, void *edx, Float) = CAST(func, 0x00642B30);
     func(self, edx, a2);
 
-    {
+    if (g_console != nullptr) {
         g_console->frame_advance(a2);
     }
 }
 
+#include "subtitle_manager.h"
+
 void hook_nglListEndScene()
 {
-    g_console->render();
+    // Subtitles are rendered here, inside the final UI scene, at Z=-9999 (closest layer).
+    // This is the last draw pass before nglListEndScene, so subtitles appear above
+    // standard game UI. Comic panel freeze-frame captures happen in separate off-screen
+    // scenes, so subtitles are NOT captured into panel textures from this call site.
+    subtitle_manager::render();
+
+    if (g_console != nullptr) {
+        g_console->render();
+    }
 
     CDECL_CALL(0x0076A030);
 }

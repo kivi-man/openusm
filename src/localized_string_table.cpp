@@ -1,4 +1,5 @@
 #include "localized_string_table.h"
+#include "ps4_controller.h"
 
 #include "femanager.h"
 #include "fileusm.h"
@@ -14,6 +15,7 @@
 
 #include <array>
 #include <cassert>
+#include <string>
 
 namespace {
 constexpr int PC_GLOBAL_TEXT_COUNT = 478;
@@ -329,6 +331,49 @@ void localized_string_table::sub_60BD30() {
                     }
                 } while (*++v7);
             }
+
+            if (strings[i] != nullptr) {
+                std::string s(strings[i]);
+                bool modified = false;
+                auto replace_all = [&](const std::string &from, const std::string &to) {
+                    size_t pos = 0;
+                    while ((pos = s.find(from, pos)) != std::string::npos) {
+                        s.replace(pos, from.length(), to);
+                        pos += to.length();
+                        modified = true;
+                    }
+                };
+
+                replace_all("[SPACE]", "~cross");
+                replace_all("[Space]", "~cross");
+                replace_all("[ENTER]", "~cross");
+                replace_all("[Enter]", "~cross");
+                replace_all("[ESC]", "~start");
+                replace_all("[Esc]", "~start");
+                replace_all("[TAB]", "~select");
+                replace_all("[Tab]", "~select");
+                replace_all("[LMB]", "~square");
+                replace_all("[RMB]", "~triangle");
+                replace_all("[Left Mouse Button]", "~square");
+                replace_all("[Right Mouse Button]", "~triangle");
+                replace_all("[E]", "~circle");
+                replace_all("[e]", "~circle");
+                replace_all("[Q]", "~l2");
+                replace_all("[q]", "~l2");
+                replace_all("[Left Shift]", "~r2");
+                replace_all("[LEFT SHIFT]", "~r2");
+                replace_all("[SHIFT]", "~r2");
+                replace_all("[Shift]", "~r2");
+                replace_all("[W,A,S,D]", "~stick_left");
+                replace_all("[WASD]", "~stick_left");
+                replace_all("ENTER:", "~cross");
+                replace_all("ESC:", "~triangle");
+                replace_all("SPACE:", "~cross");
+
+                if (modified) {
+                    strings[i] = strdup(s.c_str());
+                }
+            }
         }
     }
 
@@ -351,8 +396,6 @@ const char *localized_string_table::lookup_scripttext_string(int num) {
 
     const int global_text_count = localized_global_text_count(this);
     auto *result = strings[global_text_count + num];
-
-    //    sp_log("lookup_scripttext_string: %s %d", result, num);
 
     return result != nullptr ? result : localized_error_string(this);
 }

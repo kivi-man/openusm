@@ -745,11 +745,7 @@ bool get_pack_file_stats(const resource_key &a1, resource_pack_location *a2, mSt
 
             if (i < 0 || i >= amalgapak_pack_location_count ||
                 amalgapak_pack_location_table[i].loc.field_0.m_hash != a1.m_hash) {
-                sp_log("Pack lookup failed: hash=0x%08X type=%d platform=%d count=%d",
-                       a1.m_hash.source_hash_code,
-                       a1.m_type,
-                       g_platform,
-                       amalgapak_pack_location_count);
+                // Silenced: probing for scene variants regularly queries non-existent pack variants
                 return false;
             }
         }
@@ -995,6 +991,20 @@ void create_inst()
             load_amalgapak();
         }
 
+        // Expand City Map 0
+        if (memory_maps != nullptr && memory_maps_count > 0) {
+            for (int m = 0; m < memory_maps_count; ++m) {
+                if (memory_maps[m].field_10[6].field_C > 0) {
+                    memory_maps[m].field_10[6].field_C = 200; // All 194 district slots
+                }
+                if (memory_maps[m].field_10[5].field_C > 0) {
+                    memory_maps[m].field_10[5].field_C = 25;  // All 21 strip slots
+                }
+            }
+        }
+
+        resource_buffer_size = 512 * 1024 * 1024;
+
         resource_buffer = static_cast<uint8_t *>(arch_memalign(4096u, resource_buffer_size));
         resource_buffer_used = 0;
         configure_packs_by_memory_map(0);
@@ -1021,131 +1031,100 @@ void configure_packs_by_memory_map(int idx)
         sp_log("resource_buffer_used = %d", resource_buffer_used);
     }
 
-    if constexpr (1)
-    {
-        const auto v14 = in_use_memory_map;
-        int pop_start_idx = 0;
+    const auto v14 = in_use_memory_map;
+    int pop_start_idx = 0;
 
-        const auto partitions_size = partitions->size();
+    const auto partitions_size = partitions->size();
+    if (v14 >= 0) {
         for (auto i = 0u; i < partitions_size; ++i) {
             auto func = [](const auto *self, const auto *a2) -> bool {
-                return (self->field_0 == a2->field_0 && self->field_4 == a2->field_4
-                        && self->field_8 == a2->field_8
-                        && self->field_C == a2->field_C);
+                return (self->field_0 == a2->field_0 &&
+                        self->field_4 == a2->field_4 &&
+                        self->field_8 == a2->field_8 &&
+                        self->field_C == a2->field_C);
             };
 
-            if (memory_maps[idx].field_10[i].field_4 == 1 &&
-                func(&memory_maps[v14].field_10[i], &memory_maps[idx].field_10[i])) {
+            // Contiguous prefix match: stop at the first differing partition!
+            if (func(&memory_maps[v14].field_10[i], &memory_maps[idx].field_10[i])) {
                 ++pop_start_idx;
+            } else {
+                break;
             }
         }
+    }
 
-        for (int i = partitions_size - 1; i >= pop_start_idx; --i) {
-            resource_buffer_used -= partitions->at(i)->partition_buffer_size;
-            auto *part = partitions->back();
-            assert(part != nullptr && part->get_streamer() != nullptr);
+    // Clean up mismatching partitions from back to pop_start_idx
+    for (int i = static_cast<int>(partitions->size()) - 1; i >= pop_start_idx; --i) {
+        auto *part = partitions->back();
+        assert(part != nullptr);
 
-            auto *streamer = part->get_streamer();
-            if (streamer->is_active()) {
-                streamer->flush(nullptr);
-                streamer->unload_all();
-                streamer->flush(nullptr);
-            }
+        resource_buffer_used -= part->partition_buffer_size;
 
-            if (part != nullptr) {
-                THISCALL(0x0053DFD0, part);
-                operator delete(part);
-                part = nullptr;
-            }
-
-            if (!partitions->empty()) {
-#ifndef TEST_CASE
-                --partitions->m_last;
-#else
-                partitions->resize(partitions->size() - 1);
-#endif
-            }
+        auto *streamer = part->get_streamer();
+        if (streamer != nullptr) {
+            streamer->flush(nullptr);
+            streamer->unload_all();
+            streamer->flush(nullptr);
         }
 
-        assert(static_cast<int>(partitions->size()) == pop_start_idx);
+        delete part;
+        partitions->pop_back();
+    }
 
-        for (uint32_t i = pop_start_idx; i < RESOURCE_PARTITION_END; ++i)
+    assert(static_cast<int>(partitions->size()) == pop_start_idx);
+
+    // Create required partitions for new memory map
+    for (uint32_t i = pop_start_idx; i < RESOURCE_PARTITION_END; ++i)
+    {
+        auto *new_partition = new resource_partition {static_cast<resource_partition_enum>(i)};
+
+        auto &memory_map = memory_maps[idx];
+        auto &tmp = memory_map.field_10[i];
+
+        new_partition->field_0 = tmp.field_4;
+        new_partition->partition_buffer_size = tmp.field_C * tmp.field_8;
+
+        assert((new_partition->partition_buffer_size + resource_buffer_used <= resource_buffer_size) &&
+               "Verify we have room for this partition");
+
+        new_partition->partition_buffer_used = 0;
+        new_partition->field_A8 = &resource_buffer[resource_buffer_used];
+        resource_buffer_used += new_partition->partition_buffer_size;
+
+        if (new_partition->field_0 >= 0 && new_partition->field_0 <= 1)
         {
-            auto *new_partition = new resource_partition {static_cast<resource_partition_enum>(i)};
-
-            auto &memory_map = memory_maps[idx];
-            auto &tmp = memory_map.field_10[i];
-
-            new_partition->field_0 = tmp.field_4;
-            new_partition->partition_buffer_size = tmp.field_C *
-                tmp.field_8;
-
-            assert((new_partition->partition_buffer_size + resource_buffer_used <=
-                    resource_buffer_size) &&
-                   "Verify we have room for this partition");
-        
-            new_partition->partition_buffer_used = 0;
-            new_partition->field_A8 = &resource_buffer[resource_buffer_used];
-            resource_buffer_used += new_partition->partition_buffer_size;
-            if (new_partition->field_0 >= 0 && new_partition->field_0 <= 1)
-            {
-                for (int j = 0; j < tmp.field_C; ++j) {
-                    new_partition->push_pack_slot(tmp.field_8, nullptr);
-                }
-            }
-
-            if constexpr (0)
-            {
-                if (partitions->size() < partitions->capacity())
-                {
-                    auto *v30 = partitions->m_last;
-                    *v30 = new_partition;
-                    partitions->m_last = v30 + 1;
-                }
-                else
-                {
-                    void (__fastcall *_Insert_n)(void *, void *edx, void *, int, resource_partition **) = CAST(_Insert_n, 0x0056A260);
-                    _Insert_n(partitions, nullptr, partitions->m_last, 1, &new_partition);
-                }
-            }
-            else
-            {
-                partitions->push_back(new_partition);
+            for (int j = 0; j < tmp.field_C; ++j) {
+                new_partition->push_pack_slot(tmp.field_8, nullptr);
             }
         }
 
-        assert(partitions->size() == RESOURCE_PARTITION_END &&
-               "If this fails there's something wrong with the partition preserving code.");
+        partitions->push_back(new_partition);
+    }
 
-        {
-            auto begin = std::begin(memory_maps[idx].field_10);
-            auto end = begin + RESOURCE_PARTITION_END;
-            auto v7 = std::accumulate(begin, end, 0, [](auto prev_result, auto &v) {
-                return v.field_C * v.field_8 + prev_result;
-            });
+    assert(partitions->size() == RESOURCE_PARTITION_END &&
+           "If this fails there's something wrong with the partition preserving code.");
 
-            sp_log("Resource manager now using a memory map of size %d MB (%d KB)",
+    {
+        auto begin = std::begin(memory_maps[idx].field_10);
+        auto end = begin + RESOURCE_PARTITION_END;
+        auto v7 = std::accumulate(begin, end, 0, [](auto prev_result, auto &v) {
+            return v.field_C * v.field_8 + prev_result;
+        });
+
+        sp_log("Resource manager now using a memory map of size %d MB (%d KB)",
                v7 / 1024 / 1024,
                v7 / 1024);
-        }
+    }
 
-        in_use_memory_map = idx;
-        set_active_resource_context(nullptr);
-    }
-    else
-    {
-        CDECL_CALL(0x00558930, idx);
-    }
+    in_use_memory_map = idx;
+    set_active_resource_context(nullptr);
 
     {
         printf("\n");
         sp_log("--- end ---");
-
         sp_log("in_use_memory_map %d", in_use_memory_map);
-
-        const auto partitions_size = partitions->size();
-        sp_log("partitions_size = %u", partitions_size);
-
+        const auto final_partitions_size = partitions->size();
+        sp_log("partitions_size = %u", final_partitions_size);
         sp_log("resource_buffer_used %d", resource_buffer_used);
     }
 }
@@ -1315,22 +1294,18 @@ void resource_manager_patch()
 
     SET_JUMP(0x0052A820, resource_manager::get_pack_file_stats);
 
-    SET_JUMP(0x00537650, resource_manager::load_amalgapak);
-
-    SET_JUMP(0x0055BA30, resource_manager::create_inst);
-
-    SET_JUMP(0x00547AD0, resource_manager::delete_inst);
+    // NOTE: load_amalgapak, create_inst, delete_inst are intentionally NOT hooked here.
+    // The native USM.EXE handles partition creation/deletion and memory layout correctly.
+    // resource_streaming_expansion_patch() handles the 96MB and district slot expansion.
 
     SET_JUMP(0x0054C2E0, resource_manager::reload_amalgapak);
 
     SET_JUMP(0x0053DE90, resource_manager::can_reload_amalgapak);
 
     SET_JUMP(0x0051ED70, resource_manager::get_pack_location);
-
-    {
-        REDIRECT(0x0055A371, resource_manager::configure_packs_by_memory_map);
-    }
 }
+
+
 
 void resource_manager_xbpack_patch()
 {
@@ -1342,3 +1317,58 @@ void resource_manager_xbpack_patch()
     SET_JUMP(0x0055DEA0, compare_resource_key_resource_pack_location);
 #endif
 }
+
+static void custom_expand_memory_maps_and_call_amalgapak()
+{
+    // 1. Call native load_amalgapak
+    CDECL_CALL(0x00537650);
+
+    // 2. Expand district slots to 12 and strip slots to 6 in native memory_maps table.
+    // With loaded_regions_cache_patch() hooked at 0x00565BF0 and 0x0052E8B0,
+    // all loaded districts are queried across the entire terrain, completely bypassing the 9-slot BSS limit.
+    // 12 district slots and 6 strip slots allow the entire Manhattan island to stream HD geometry,
+    // high-detail building meshes, and textures simultaneously without any pop-in or low-poly proxies!
+    auto *maps = *(uint8_t **)0x0095C2F0;
+    int count = *(int *)0x0095C7F4;
+    if (maps != nullptr && count > 0) {
+        for (int m = 0; m < count; ++m) {
+            uint8_t *map_ptr = maps + m * 0x90;
+            if (m == 0 || strncmp((const char *)map_ptr, "city", 4) == 0) {
+                int *district_slots = (int *)(map_ptr + 0x7C);
+                int *strip_slots = (int *)(map_ptr + 0x6C);
+                if (*district_slots > 0) {
+                    *district_slots = 14;
+                }
+                if (*strip_slots > 0) {
+                    *strip_slots = 6;
+                }
+            }
+        }
+    }
+}
+
+void resource_streaming_expansion_patch()
+{
+    // Hook load_amalgapak call inside create_inst to configure memory_maps cleanly
+    REDIRECT(0x0055BAA7, custom_expand_memory_maps_and_call_amalgapak);
+
+    // Override resource_buffer_size directly in native create_inst (0x0055BAC8) to 160 MB (0x0A000000)
+    // which provides ample headroom for 14 active districts and strips safely within 32-bit limits.
+    {
+        DWORD oldProtect;
+        VirtualProtect((void *)0x0055BAC8, 5, PAGE_EXECUTE_READWRITE, &oldProtect);
+        const uint8_t patch[] = { 0xB8, 0x00, 0x00, 0x00, 0x0A }; // mov $0x0A000000 (160MB), %eax
+        memcpy((void *)0x0055BAC8, patch, 5);
+        VirtualProtect((void *)0x0055BAC8, 5, oldProtect, &oldProtect);
+
+        VirtualProtect((void *)0x0095C1C8, 4, PAGE_EXECUTE_READWRITE, &oldProtect);
+        *(uint32_t *)0x0095C1C8 = 160 * 1024 * 1024;
+        VirtualProtect((void *)0x0095C1C8, 4, oldProtect, &oldProtect);
+    }
+}
+
+
+
+
+
+

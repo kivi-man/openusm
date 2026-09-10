@@ -1,8 +1,10 @@
 #include "rumble_manager.h"
+#include "ps4_controller.h"
 
 #include "common.h"
 #include "func_wrapper.h"
 #include "input_mgr.h"
+#include "utility.h"
 
 VALIDATE_SIZE(rumble_manager, 0x64);
 
@@ -42,14 +44,6 @@ rumble_manager::rumble_manager() {
 }
 
 void rumble_manager::stop_vibration() {
-    THISCALL(0x005BA4E0, this);
-}
-
-void rumble_manager::enable_vibration() {
-    input_mgr::instance->field_20 &= 0xFFFFFFFD;
-}
-
-void rumble_manager::disable_vibration() {
     this->field_21 = 1;
     this->field_1C = 0.0;
     this->field_4 = -1.0;
@@ -66,12 +60,41 @@ void rumble_manager::disable_vibration() {
     if (v1) {
         (*(void (**)(void))(*(uint32_t *) v1 + 60))();
     }
+    ps4_controller::instance().stop_vibration();
+}
 
+void rumble_manager::enable_vibration() {
+    input_mgr::instance->field_20 &= 0xFFFFFFFD;
+}
+
+void rumble_manager::disable_vibration() {
+    stop_vibration();
     input_mgr::instance->field_20 |= 2u;
 }
 
 void rumble_manager::vibrate(rumble_struct a2) {
-    THISCALL(0x005D78F0, this, a2);
+    this->field_4 = a2.field_0;
+    this->field_8 = a2.field_4;
+    this->field_C = a2.field_8;
+    this->field_10 = a2.field_C;
+    this->field_14 = a2.field_10;
+    this->field_18 = a2.field_14;
+    this->field_1C = a2.field_18;
+    this->field_20 = a2.field_1C;
+    this->field_21 = a2.field_1D;
+    this->field_24 = a2.field_20;
+    this->field_5C = true;
+    this->field_5D = false;
+
+    ps4_controller::instance().vibrate(a2);
+}
+
+void rumble_manager_patch() {
+    FUNC_ADDRESS(vibrate_addr, &rumble_manager::vibrate);
+    SET_JUMP(0x005D78F0, vibrate_addr);
+
+    FUNC_ADDRESS(stop_addr, &rumble_manager::stop_vibration);
+    SET_JUMP(0x005BA4E0, stop_addr);
 }
 
 void rumble_manager::get_current_rumble_info(rumble_struct &a2) {

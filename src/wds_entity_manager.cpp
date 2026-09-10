@@ -179,42 +179,14 @@ int wds_entity_manager::add_ent_to_lists(_std::vector<entity *> *a2,
 {
     TRACE("wds_entity_manager::add_ent_to_lists");
 
-    if constexpr (1)
-    {
-        auto result = 0;
-        switch ((entity_flavor_t) ent->get_flavor()) {
-        case ACTOR:
-        case ENTITY:
-        case MARKER:
-        case PARKING_MARKER:
-        case WATER_EXIT_MARKER:
-        case LIGHT_SOURCE:
-        case PFX:
-        case CONGLOMERATE:
-        case CONGLOMERATE_CLONE:
-        case BEAM:
-        case MANIP:
-        case SWITCH:
-        case LENSFLARE:
-        case NEOLIGHT:
-        case ANCHOR_MARKER:
-        case LINE_ANCHOR:
-        case AI_COVER_MARKER: {
-            result = this->add_entity_internal(a2, ent);
-            break;
-        }
-        case ENTITY_ITEM: {
-            result = (int) this->add_item(a3, (item *) ent);
-            break;
-        }
-        default:
-            assert(0);
-            break;
-        }
+    if (ent == nullptr) {
+        return 0;
+    }
 
-        return result;
+    if ((entity_flavor_t)ent->get_flavor() == ENTITY_ITEM) {
+        return (int)this->add_item(a3, (item *)ent);
     } else {
-        THISCALL(0x005E0970, this, a2, a3, ent);
+        return this->add_entity_internal(a2, ent);
     }
 }
 

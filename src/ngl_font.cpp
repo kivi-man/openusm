@@ -64,9 +64,28 @@ void nglParseFDF(char *a3, nglFont *font)
     font->field_4C = static_cast<decltype(font->field_4C)>(
         tlMemAlloc(sizeof(nglGlyphSize) * font->Header.NumGlyphs, 4u, 0));
     auto *tex = font->field_24;
-    float width = 1.0f / tex->m_width;
+    printf("[FONT_DBG] nglParseFDF: font='%s', tex=%p, w=%d, h=%d, cellheight=%d, ascent=%d, first=%d, num=%d\n",
+           font->field_0.to_string(), tex, tex ? tex->m_width : 0, tex ? tex->m_height : 0,
+           font->Header.CellHeight, font->Header.Ascent, font->Header.FirstGlyph, font->Header.NumGlyphs);
 
-    float height = 1.0f / tex->m_height;
+    float width = tex && tex->m_width > 0 ? (1.0f / (float)tex->m_width) : (1.0f / 2048.0f);
+    float height = tex && tex->m_height > 0 ? (1.0f / (float)tex->m_height) : (1.0f / 2048.0f);
+
+    float hd_scale = 1.0f;
+    if (strcmp(font->field_0.to_string(), "i_button_icons") == 0) {
+        if (tex && tex->m_width > 256) {
+            hd_scale = (float)tex->m_width / 256.0f;
+        } else if (font->Header.CellHeight > 35) {
+            hd_scale = (float)font->Header.CellHeight / 29.0f;
+        }
+    } else {
+        if (tex && tex->m_width > 512) {
+            hd_scale = (float)tex->m_width / 512.0f;
+        } else if (font->Header.CellHeight > 40) {
+            hd_scale = (float)font->Header.CellHeight / 24.0f;
+        }
+    }
+    printf("[FONT_DBG] font='%s', hd_scale = %f\n", font->field_0.to_string(), hd_scale);
 
     for (int i = 0; i < font->Header.NumGlyphs; ++i) {
         auto *v6 = a3;
@@ -96,6 +115,19 @@ void nglParseFDF(char *a3, nglFont *font)
         v11.field_4 = (v8->TexOfs[1] - 1) * height;
         v11.field_8 = v8->GlyphSize[0] * width + v11.field_0;
         v11.field_C = v8->GlyphSize[1] * height + v11.field_4;
+
+        if (hd_scale > 1.01f) {
+            v8->CellWidth = (int)std::round((float)v8->CellWidth / hd_scale);
+            v8->GlyphOrigin[0] = (int)std::round((float)v8->GlyphOrigin[0] / hd_scale);
+            v8->GlyphOrigin[1] = (int)std::round((float)v8->GlyphOrigin[1] / hd_scale);
+            v8->GlyphSize[0] = (int)std::round((float)v8->GlyphSize[0] / hd_scale);
+            v8->GlyphSize[1] = (int)std::round((float)v8->GlyphSize[1] / hd_scale);
+        }
+    }
+
+    if (hd_scale > 1.01f) {
+        font->Header.CellHeight = (int)std::round((float)font->Header.CellHeight / hd_scale);
+        font->Header.Ascent = (int)std::round((float)font->Header.Ascent / hd_scale);
     }
 }
 
@@ -136,7 +168,7 @@ void nglFont::sub_77E2F0(
     a4[0] = (double)v12.GlyphSize[0] * a7;
     a4[1] = (double)v12.GlyphSize[1] * a8;
 
-    auto v11 = (uint8_t)(a2 - static_cast<uint8_t>(this->Header.FirstGlyph));
+    auto v11 = (uint8_t)(v10 - static_cast<uint8_t>(this->Header.FirstGlyph));
     a5[0] = this->field_4C[v11].field_0;
     a5[1] = this->field_4C[v11].field_4;
 

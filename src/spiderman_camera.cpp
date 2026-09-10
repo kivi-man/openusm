@@ -10,6 +10,9 @@
 #include "game.h"
 #include "geometry_manager.h"
 #include "oldmath_po.h"
+#include "actor.h"
+#include "distance_fader.h"
+#include "local_collision.h"
 #include "os_developer_options.h"
 #include "trace.h"
 #include "variables.h"
@@ -83,6 +86,10 @@ void constrain_normal(vector3d &normal, const vector3d &basisA, float a4, float 
         auto v11 = v18 * v10;
         auto v6 = basisA * a3a;
         normal = v6 + v11;
+    }
+    else
+    {
+        normal = basisA * a3a;
     }
 
     assert(normal.is_normal());
@@ -221,104 +228,43 @@ void spiderman_camera::autocorrect(Float a2)
 void spiderman_camera::_autocorrect(Float a2)
 {
     TRACE("spiderman_camera::autocorrect");
-
-    if constexpr (1)
-    {
-        auto *target = this->get_target_entity();
-        camera_target_info v13 {target, 0.033333335f, this->target_pos, this->target_up};
-
-        //sp_log("0x%08X", this->field_1A0->m_vtbl);
-        this->field_1A0->request_recenter(a2, v13);
-        if (equal(a2.value, 0.0f))
-        {
-            this->target_pos = v13.pos;
-            this->target_up = v13.up;
-        }
-
-    } else {
-        THISCALL(0x004B63F0, this, a2);
-    }
+    // NO-OP: Disable forced auto-centering behind Spider-Man's back for true free camera (Marvel's Spider-Man style)
 }
 
 void spiderman_camera::_set_target_entity(entity *e)
 {
     TRACE("spiderman_camera::set_target_entity");
 
-    assert(e->has_physical_ifc());
+    if (e == nullptr) {
+        game_camera::set_target_entity(nullptr);
+        return;
+    }
 
-    assert(e->is_a_conglomerate());
-
-    game_camera::set_target_entity(e);
+    if (e->has_physical_ifc() && e->is_a_conglomerate()) {
+        game_camera::set_target_entity(e);
+    }
 }
 
 void spiderman_camera::_frame_advance(Float a2)
 {
-    TRACE("spiderman_camera::frame_advance");
+    TRACE("spiderman_camera::_frame_advance");
 
-    if (this->field_1A0 != nullptr) {
-        sp_log("0x%08X", this->field_1A0->m_vtbl);
+    // Set terrain streaming distance (2500m streaming, 15000m camera far clip plane for 12km skydome)
+    *(float *)0x00921DA4 = 2500.0f;
+    *(float *)0x00921E2C = 15000.0f; // 15000m far clip plane (allows 12km sky_day dome to render)
+    *(float *)0x00921E30 = 15000.0f;
+
+    if (g_world_ptr != nullptr) {
+        g_world_ptr->field_A0.field_84 = 3500.0f; // Fog start pushed to 3500m
+        g_world_ptr->field_A0.field_88 = 4500.0f; // Fog end pushed to 4500m
+        g_world_ptr->field_A0.field_90 = 1.0f;
     }
 
-    if constexpr (0)
-    {
-        if ( g_game_ptr->level_is_loaded()
-            && !g_game_ptr->is_paused()
-            && !os_developer_options::instance->get_flag(mString {"SHOW_PROFILE_INFO"}) )
-        {
-            static int & old_devopt_fov = var<int>(0x00959E54);
-            this->field_1D0.update(a2);
-            auto CAMERA_FOV = os_developer_options::instance->get_int(mString {"CAMERA_FOV"});
-            if ( CAMERA_FOV != old_devopt_fov )
-            {
-                old_devopt_fov = CAMERA_FOV;
-                auto fov = CAMERA_FOV * 0.017453292f;
-                this->set_fov(fov);
-            }
 
-            if ( !this->field_12C )
-            {
-                this->autocorrect(0.0);
-                this->field_12C = true;
-            }
 
-            set_filter_time(a2);
-            if ( this->get_target_entity() == nullptr ) {
-                this->set_target_entity(g_world_ptr->get_hero_ptr(0));
-            }
+    // Let native engine handle all camera logic (matrices, filtering, transitions, collision)
+    THISCALL(0x004B60B0, this, a2);
 
-            auto *target_entity = this->get_target_entity();
-            camera_target_info v18 {target_entity, a2, this->target_pos, this->target_up};
-
-            vector3d v17 = this->get_abs_position() - v18.pos;
-            v18.field_48 = v17;
-            auto len2 = (v18.pos - this->target_pos).length2();
-            if ( len2 > sqr(16.0) ) {
-                this->autocorrect(0.0);
-            }
-
-            auto *the_controller = v18.field_54->m_player_controller;
-            if ( the_controller != nullptr ) {
-                the_controller->force_always_camera_relative(false);
-            }
-
-            camera_frame v19 {this->get_abs_po()};
-            v19.fwd.normalize();
-
-            this->field_1A0->frame_advance(a2, v19, v18);
-            auto a2a = v19.get_po();
-
-            this->set_abs_po(a2a);
-
-            this->set_frame_delta(a2a, a2);
-
-            this->target_pos = v18.pos;
-            this->target_up = v18.up;
-        }
-    }
-    else
-    {
-        THISCALL(0x004B60B0, this, a2);
-    }
 }
 
 void constrain_relative_to_plane(
@@ -345,19 +291,11 @@ void constrain_relative_to_plane(
 void spiderman_camera_patch()
 {
     {
-        REDIRECT(0x004B6159, set_filter_time);
-    }
-
-    {
         FUNC_ADDRESS(address, &spiderman_camera::_autocorrect);
         set_vfunc(0x008823B0, address);
     }
 
-    {
-        FUNC_ADDRESS(address, &spiderman_camera::_set_target_entity);
-        set_vfunc(0x00882394, address);
-    }
-
+    // _frame_advance: update draw distance then let native handle camera
     {
         FUNC_ADDRESS(address, &spiderman_camera::_frame_advance);
         set_vfunc(0x00882284, address);

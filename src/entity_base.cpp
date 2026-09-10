@@ -1457,6 +1457,12 @@ void entity_base::dirty_family(bool a2)
 
 void entity_base::enter_limbo()
 {
+    if (g_world_ptr != nullptr && (this == bit_cast<entity_base *>(g_world_ptr->get_hero_ptr(0)) || this->get_conglom_owner() == bit_cast<entity_base *>(g_world_ptr->get_hero_ptr(0)))) {
+        // HERO IMMUNITY: Spider-Man and hero conglomerate parts must NEVER enter limbo!
+        this->set_ext_flag_recursive_internal(static_cast<entity_ext_flag_t>(EXTFLAG_UPDATE_VIA_REGIONLINK), false);
+        return;
+    }
+
     if ( !this->is_ext_flagged(EXTFLAG_UPDATE_VIA_REGIONLINK) && this->is_ext_flagged(0x200u) )
     {
         vhandle_type<entity> v3 {this->get_my_handle()};

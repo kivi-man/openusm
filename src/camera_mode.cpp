@@ -615,8 +615,84 @@ void camera_mode_combat::_frame_advance(
     }
 }
 
+static void disable_camera_auto_center_patches()
+{
+    DWORD oldProtect;
+
+    // 1. Disable spiderman_camera::autocorrect (0x004B63F0 -> ret 4)
+    //    Completely prevents any automatic recentering/autocorrect across the engine
+    VirtualProtect((void *)0x004B63F0, 3, PAGE_EXECUTE_READWRITE, &oldProtect);
+    const uint8_t patch_autocorrect[] = { 0xC2, 0x04, 0x00 }; // ret 4
+    memcpy((void *)0x004B63F0, patch_autocorrect, 3);
+    VirtualProtect((void *)0x004B63F0, 3, oldProtect, &oldProtect);
+
+    // 2. Skip 16-meter distance check in spiderman_camera::_frame_advance (0x004B622A)
+    //    75 0C (jne 0x4b6238) -> EB 0C (jmp 0x4b6238)
+    VirtualProtect((void *)0x004B622A, 2, PAGE_EXECUTE_READWRITE, &oldProtect);
+    const uint8_t patch_16m[] = { 0xEB, 0x0C }; // jmp 0x4b6238
+    memcpy((void *)0x004B622A, patch_16m, 2);
+    VirtualProtect((void *)0x004B622A, 2, oldProtect, &oldProtect);
+
+    // 3. Disable camera_mode_passive::request_recenter (0x004B31C0 -> ret 8)
+    //    Prevents snap counter (0x00959E5C) from being incremented
+    VirtualProtect((void *)0x004B31C0, 3, PAGE_EXECUTE_READWRITE, &oldProtect);
+    const uint8_t patch_recenter[] = { 0xC2, 0x08, 0x00 }; // ret 8
+    memcpy((void *)0x004B31C0, patch_recenter, 3);
+    VirtualProtect((void *)0x004B31C0, 3, oldProtect, &oldProtect);
+
+    // 4. Disable instant snap in camera_mode_chase::pull_by_target (0x004B5E9F)
+    //    74 13 (je 0x4b5eb4) -> EB 13 (jmp 0x4b5eb4)
+    VirtualProtect((void *)0x004B5E9F, 2, PAGE_EXECUTE_READWRITE, &oldProtect);
+    const uint8_t patch_pull_snap[] = { 0xEB, 0x13 }; // jmp 0x4b5eb4
+    memcpy((void *)0x004B5E9F, patch_pull_snap, 2);
+    VirtualProtect((void *)0x004B5E9F, 2, oldProtect, &oldProtect);
+
+    // 5. Disable swinging / falling / jumping camera snap in camera_mode_passive::_frame_advance (0x004B77ED)
+    //    0F 84 E1 00 00 00 (je 0x4b78d4) -> E9 E2 00 00 00 90 (jmp 0x4b78d4; nop)
+    //    Skips constrain_normal(frame.fwd, v38, -0.1f, 0.1f) completely!
+    VirtualProtect((void *)0x004B77ED, 6, PAGE_EXECUTE_READWRITE, &oldProtect);
+    const uint8_t patch_swing_snap[] = { 0xE9, 0xE2, 0x00, 0x00, 0x00, 0x90 }; // jmp 0x4b78d4; nop
+    memcpy((void *)0x004B77ED, patch_swing_snap, 6);
+    VirtualProtect((void *)0x004B77ED, 6, oldProtect, &oldProtect);
+
+    // 6. Disable loco mode 9 forced include_target in camera_mode_passive::_frame_advance (0x004B76B7)
+    //    0F 84 AC 00 00 00 (je 0x4b7769) -> E9 AD 00 00 00 90 (jmp 0x4b7769; nop)
+    VirtualProtect((void *)0x004B76B7, 6, PAGE_EXECUTE_READWRITE, &oldProtect);
+    const uint8_t patch_loco9[] = { 0xE9, 0xAD, 0x00, 0x00, 0x00, 0x90 }; // jmp 0x4b7769; nop
+    memcpy((void *)0x004B76B7, patch_loco9, 6);
+    VirtualProtect((void *)0x004B76B7, 6, oldProtect, &oldProtect);
+
+    // 7. Continuous orbit follow in camera_mode_lookaround (0x004B5508)
+    //    When mouse/stick delta is 0, DO NOT drop or freeze the camera!
+    //    Jump unconditionally to 0x004B5599 so the camera continuously tracks and follows
+    //    Spider-Man at the exact orbit angle and distance (Modern Spider-Man style).
+    //    0x004B5508: 0F 84 8B 00 00 00 -> E9 8C 00 00 00 90 (jmp 0x4b5599; nop)
+    VirtualProtect((void *)0x004B5508, 6, PAGE_EXECUTE_READWRITE, &oldProtect);
+    const uint8_t patch_continuous_follow[] = { 0xE9, 0x8C, 0x00, 0x00, 0x00, 0x90 };
+    memcpy((void *)0x004B5508, patch_continuous_follow, 6);
+    VirtualProtect((void *)0x004B5508, 6, oldProtect, &oldProtect);
+
+    // 8. Remove 0.25f mouse/analog acceleration clamp (0x004B55AE)
+    //    Provides instant 1:1 smooth camera rotation without lag or clamp
+    //    0F 85 5D 01 00 00 -> E9 5E 01 00 00 90 (jmp 0x4b5711; nop)
+    VirtualProtect((void *)0x004B55AE, 6, PAGE_EXECUTE_READWRITE, &oldProtect);
+    const uint8_t patch_smooth_turn[] = { 0xE9, 0x5E, 0x01, 0x00, 0x00, 0x90 };
+    memcpy((void *)0x004B55AE, patch_smooth_turn, 6);
+    VirtualProtect((void *)0x004B55AE, 6, oldProtect, &oldProtect);
+
+    // 9. Disable camera roll tilt wobble while in air (0x004B756D)
+    //    Prevents erratic horizon banking when swinging/gliding and turning left/right
+    //    0F 84 0C 01 00 00 -> E9 0D 01 00 00 90 (jmp 0x4b767f; nop)
+    VirtualProtect((void *)0x004B756D, 6, PAGE_EXECUTE_READWRITE, &oldProtect);
+    const uint8_t patch_unroll[] = { 0xE9, 0x0D, 0x01, 0x00, 0x00, 0x90 };
+    memcpy((void *)0x004B756D, patch_unroll, 6);
+    VirtualProtect((void *)0x004B756D, 6, oldProtect, &oldProtect);
+}
+
 void camera_mode_patch()
 {
+    disable_camera_auto_center_patches();
+
     {
         FUNC_ADDRESS(address, &camera_mode_shake::_frame_advance);
         set_vfunc(0x00881EAC, address);

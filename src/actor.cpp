@@ -1397,34 +1397,26 @@ void actor_patch()
         SET_JUMP(0x004E2670, address);
     }
 
-    {
-        SET_JUMP(0x004B8D00, actor_get_render_color);
-    }
+    // SET_JUMP(0x004B8D00, actor_get_render_color);
 
-    {
-        FUNC_ADDRESS(address, &actor::_get_render_alpha_mod);
-        SET_JUMP(0x004B8DF0, address);
-    }
+    // FUNC_ADDRESS(address, &actor::_get_render_alpha_mod);
+    // SET_JUMP(0x004B8DF0, address);
 
     {
         FUNC_ADDRESS(address, &actor::_un_mash);
         set_vfunc(0x00884304, address);
     }
 
-    {
-        FUNC_ADDRESS(address, &actor::_render);
-        set_vfunc(0x0088434C, address);
-    }
+    // FUNC_ADDRESS(address, &actor::_render);
+    // set_vfunc(0x0088434C, address);
 
-    {
-        FUNC_ADDRESS(address, &actor::is_frame_delta_valid);
-        SET_JUMP(0x004B8FC0, address);
-    }
+    // FUNC_ADDRESS(address, &actor::is_frame_delta_valid);
+    // SET_JUMP(0x004B8FC0, address);
 
-    {
-        FUNC_ADDRESS(address, &actor::cancel_animated_movement);
-        SET_JUMP(0x004E3970, address);
-    }
+    // {
+    //     FUNC_ADDRESS(address, &actor::cancel_animated_movement);
+    //     SET_JUMP(0x004E3970, address);
+    // }
     return;
 
     {

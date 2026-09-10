@@ -83,8 +83,8 @@ wds_render_manager::wds_render_manager() {
     this->field_90 = 1.0f;
     this->field_5C = nullptr;
     this->field_8C = 0;
-    this->field_84 = 175.0f;
-    this->field_88 = 250.0f;
+    this->field_84 = 480.0f;
+    this->field_88 = 750.0f;
 }
 
 void show_terrain_info()
@@ -179,6 +179,8 @@ int wds_render_manager::add_far_away_entity(vhandle_type<entity> a2) {
 void wds_render_manager::init_level(const char *a2)
 {
     TRACE("wds_render_manager::init_level", a2);
+    this->field_84 = 1000.0f;
+    this->field_88 = 1500.0f;
     if constexpr (1) {
         if (this->field_5C == nullptr) {
             tlFixedString a1{"obb_shadow000"};
@@ -281,7 +283,7 @@ void update_camera_teleport(camera &cam)
             for (auto i = 0u; i < a2.size(); ++i) 
             {
                 region *reg = a2.at(i);
-                assert(reg != nullptr);
+                if (reg == nullptr || reg->visibility_map == nullptr) continue;
 
                 reg->visibility_map->traverse_sphere(
                                                 abs_pos,
@@ -327,113 +329,7 @@ void wds_render_manager::render(camera &a2, int a3)
 {
     TRACE("wds_render_manager::render");
 
-    assert(this->field_94 != nullptr);
-
-    if constexpr (1)
-    {
-        sub_520E60();
-        update_camera_teleport(a2);
-        if ( g_disable_occlusion_culling() == 3 )
-        {
-            occlusion::reset_active_occluders();
-        }
-        else
-        {
-            this->update_occluders(a2);
-            occlusion::init_frame(a2.get_abs_position());
-        }
-
-        auto *panel_params = comic_panels::get_panel_params();
-        if ( panel_params == nullptr || (panel_params->field_0 & 0x20) != 0 )
-        {
-            this->create_colorvol_scene();
-            
-            if ( debug_render_get_bval(LOW_LODS) ) {
-                this->render_lowlods(a2);
-            }
-
-            g_camera_link() = &a2;
-
-            this->field_30.field_0.clear();
-            this->field_30.field_10.clear();
-
-            a2.compute_sector(g_world_ptr->the_terrain, false, nullptr);
-            auto *prim_reg = a2.get_primary_region();
-
-            auto *reg = g_world_ptr->the_terrain->find_region(a2.get_abs_position(), nullptr);
-            if ( reg != prim_reg )
-            {
-                auto *v10 = g_world_ptr->get_hero_ptr(a3);
-                if ( v10 != nullptr )
-                {
-                    if ( v10->get_primary_region() == nullptr )
-                    {
-                        prim_reg = reg;
-                    }
-                }
-            }
-
-            if ( prim_reg == nullptr )
-            {
-                sp_log("no camera region!!!!");
-                if ( g_disable_occlusion_culling() != 3 ) {
-                    occlusion::term_frame();
-                }
-
-                return;
-            }
-
-            geometry_manager::rebuild_view_frame();
-            ++region::visit_key;
-            this->field_30.field_0.reserve(g_world_ptr->the_terrain->get_num_regions() + 1);
-
-            a2.get_abs_position();
-
-            this->build_render_data_regions(this->field_30, a2);
-            this->sub_53D560(a2);
-        }
-
-        if ( debug_render_get_bval(ENTITIES) )
-        {
-            this->build_render_data_ents(this->field_30, a2, a3);
-            aeps::FrameSetupRenderAndThenRender();
-            if ( panel_params == nullptr || (panel_params->field_0 & 0x20) != 0 )
-            {
-                motion_effect_struct::render_all_motion_fx(a2, geometry_manager::world_space_frustum());
-                update_spidey_interface();
-                ++entity::visit_key;
-            }
-        }
-
-        if ( panel_params == nullptr || (panel_params->field_0 & 0x20) != 0 )
-        {
-            send_shadow_projectors();
-
-            if ( debug_render_get_bval(OCCLUSION) )
-            {
-                occlusion::debug_render_occluders();
-            }
-
-            this->debug_render();
-            this->clear_colorvol_scene();
-        }
-
-        if ( g_disable_occlusion_culling() != 3 ) {
-            occlusion::term_frame();
-        }
-
-    } else {
-        THISCALL(0x0054B250, this, &a2, a3);
-    }
-
-    //_populate_missions();
-
-    if ( debug_render_get_bval(OCCLUSION) )
-    {
-        occlusion::debug_render_occluders();
-    }
-
-    this->debug_render();
+    THISCALL(0x0054B250, this, &a2, a3);
 }
 
 void render_data::sub_56FCB0() {
@@ -517,17 +413,17 @@ void wds_render_manager_patch()
         FUNC_ADDRESS(address, &wds_render_manager::render_region_mesh);
         REDIRECT(0x0053D234, address);
 
-        REDIRECT(0x00537465, FastListAddMesh);
+        // REDIRECT(0x00537465, FastListAddMesh); // native 0x00507690 handles mesh addition cleanly
     }
 
-    REDIRECT(0x0054B410, debug_render_get_bval);
+    // REDIRECT(0x0054B410, debug_render_get_bval);
 
     {
         FUNC_ADDRESS(address, &wds_render_manager::render);
         REDIRECT(0x0054E52D, address);
     }
 
-    REDIRECT(0x0054B265, update_camera_teleport);
+    // REDIRECT(0x0054B265, update_camera_teleport);
 
     {
         FUNC_ADDRESS(address, &wds_render_manager::init_level);
@@ -554,3 +450,98 @@ void wds_render_manager_patch()
         REDIRECT(0x0054B403, address);
     }
 }
+
+__attribute__((naked)) static void safe_render_section_insert_asm()
+{
+    __asm__ __volatile__(
+        ".byte 0x8B, 0xB8, 0xC0, 0x2B, 0x00, 0x00\n" // mov edi, [eax + 0x2bc0]
+        ".byte 0x81, 0xFF, 0x86, 0x01, 0x00, 0x00\n" // cmp edi, 390 (0x186)
+        ".byte 0x7D, 0x09\n"                         // jge skip
+        ".byte 0x6B, 0xFF, 0x1C\n"                   // imul edi, edi, 0x1c
+        ".byte 0x68, 0x05, 0x79, 0x54, 0x00\n"       // push 0x00547905
+        ".byte 0xC3\n"                               // ret (jmp 0x00547905)
+        // skip:
+        ".byte 0x68, 0x42, 0x79, 0x54, 0x00\n"       // push 0x00547942
+        ".byte 0xC3\n"                               // ret (jmp 0x00547942)
+    );
+}
+
+void render_data_ents_patch() {
+    // Expand render_data_ents buffer from 750 (0x1770) to 4096 (0x8000) elements
+    // so Spider-Man, Peter Parker, and all distant/dense district entities never get dropped!
+
+    auto patch_u32 = [](uint32_t addr, uint32_t val) {
+        DWORD oldProtect;
+        VirtualProtect((void *)addr, 4, PAGE_EXECUTE_READWRITE, &oldProtect);
+        *(uint32_t *)addr = val;
+        VirtualProtect((void *)addr, 4, oldProtect, &oldProtect);
+    };
+
+    // 1. Allocation sizes: 0x8004 bytes (4096 * 8 + 4) instead of 0x1774 (750 * 8 + 4)
+    patch_u32(0x00547268, 0x8004);
+    patch_u32(0x00547292, 0x8004);
+
+    // 2. Zeroing loop count: 0x1000 (4096) instead of 0x2EE (750)
+    patch_u32(0x00560906, 0x1000);
+
+    // 3. Reset count offset: +0x8000 instead of +0x1770
+    patch_u32(0x0056091D, 0x8000);
+
+    // 4. Flush and render reads count offset: +0x8000 instead of +0x1770
+    patch_u32(0x0053D5B7, 0x8000);
+    patch_u32(0x0053D5D4, 0x8000);
+
+    // 5. Compare count limit: [ecx + 0x8000], 0x1000 (instead of 0x1770, 0x2EE)
+    patch_u32(0x005474B9, 0x8000);
+    patch_u32(0x005474BD, 0x1000);
+
+    // 6. Entity gathering addition at 0x005474D5:
+    // mov ebx, [edx + 0x8000]; cmp ebx, 4088; jge skip; mov [edx+ebx*8], esi; mov [edx+ebx*8+4], eax; inc [edx+0x8000]
+    {
+        DWORD oldProtect;
+        VirtualProtect((void *)0x005474D5, 27, PAGE_EXECUTE_READWRITE, &oldProtect);
+        const uint8_t patch[] = {
+            0x8B, 0x9A, 0x00, 0x80, 0x00, 0x00, // mov 0x8000(%edx), %ebx
+            0x81, 0xFB, 0xF8, 0x0F, 0x00, 0x00, // cmp $4088, %ebx
+            0x7D, 0x0D,                         // jge 0x005474F0 (skip only if buffer exceeds 4088)
+            0x89, 0x34, 0xDA,                   // mov %esi, (%edx,%ebx,8)
+            0x89, 0x44, 0xDA, 0x04,             // mov %eax, 0x4(%edx,%ebx,8)
+            0xFF, 0x82, 0x00, 0x80, 0x00, 0x00  // incl 0x8000(%edx)
+        };
+        memcpy((void *)0x005474D5, patch, 27);
+        VirtualProtect((void *)0x005474D5, 27, oldProtect, &oldProtect);
+    }
+
+    // 7. Sort count read: [eax + 0x8000]
+    patch_u32(0x0054751B, 0x8000);
+
+    // 8. Sorting loops & comparisons: +0x8000
+    patch_u32(0x005475DA, 0x8000);
+    patch_u32(0x0054761F, 0x8000);
+    patch_u32(0x00547951, 0x8000);
+
+    // 9. Frame-end reset: mov dword ptr [ecx + 0x8000], 0
+    patch_u32(0x005479B1, 0x8000);
+
+    // 10. Secondary entity insertion points: +0x8000
+    patch_u32(0x005309C0, 0x8000);
+    patch_u32(0x005309C6, 0x8000);
+    patch_u32(0x00562A3D, 0x8000);
+
+    // 11. Guard against buffer overflow at 0x0054793A (0x2BC0 buffer = 400 entries max)
+    // When zooming out or opening map at high draw distances, capping at 390 prevents 0x81AA1978 crash!
+    {
+        DWORD oldProtect;
+        VirtualProtect((void *)0x005478FC, 9, PAGE_EXECUTE_READWRITE, &oldProtect);
+        SET_JUMP(0x005478FC, safe_render_section_insert_asm);
+        *(uint8_t *)0x00547901 = 0x90;
+        *(uint8_t *)0x00547902 = 0x90;
+        *(uint8_t *)0x00547903 = 0x90;
+        *(uint8_t *)0x00547904 = 0x90;
+        VirtualProtect((void *)0x005478FC, 9, oldProtect, &oldProtect);
+    }
+}
+
+
+
+

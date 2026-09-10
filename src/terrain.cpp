@@ -1515,20 +1515,18 @@ void terrain::frame_advance(Float a2)
     {
         vector3d pos;
 
-        auto func = [](auto *v3) -> bool {
-            return (v3->field_5C4 || v3->field_5C3);
-        };
-
-        if (!os_developer_options::instance->get_flag(mString {"CAMERA_CENTRIC_STREAMER"})
-                || func(g_femanager.IGO->field_44) )
-        {
-            auto *ent = g_world_ptr->get_hero_ptr(0);
+        auto *ent = (g_world_ptr != nullptr) ? g_world_ptr->get_hero_ptr(0) : nullptr;
+        if (ent != nullptr) {
             pos = ent->get_abs_position();
-        }
-        else
-        {
+        } else if (g_game_ptr != nullptr) {
             auto *v5 = g_game_ptr->get_current_view_camera(0);
-            pos = v5->get_abs_position();
+            if (v5 != nullptr) {
+                pos = v5->get_abs_position();
+            } else {
+                pos = ZEROVEC;
+            }
+        } else {
+            pos = ZEROVEC;
         }
 
         auto vec1 = pos - this->field_18;

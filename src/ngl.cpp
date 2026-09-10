@@ -501,11 +501,8 @@ bool nglVertexBuffer::createVertexBufferAndWriteData(const void *a2, uint32_t si
 {
     TRACE("nglVertexBuffer::createVertexBufferAndWriteData");
 
-    if constexpr (0)
-    {
-        auto *buf = static_cast<const float *>(a2);
-
-        sp_log("%f %f", buf[0], buf[1]);
+    if (size == 0 || a2 == nullptr) {
+        return false;
     }
 
     if (createIndexOrVertexBuffer(this,
@@ -517,12 +514,19 @@ bool nglVertexBuffer::createVertexBufferAndWriteData(const void *a2, uint32_t si
         return false;
     }
 
-    void *data = nullptr;
-    this->m_vertexBuffer->lpVtbl->Lock(this->m_vertexBuffer, 0, size, &data, 0);
-    std::memcpy(data, a2, size);
-    this->m_vertexBuffer->lpVtbl->Unlock(this->m_vertexBuffer);
+    if (this->m_vertexBuffer == nullptr) {
+        return false;
+    }
 
-    return true;
+    void *data = nullptr;
+    HRESULT hr = this->m_vertexBuffer->lpVtbl->Lock(this->m_vertexBuffer, 0, size, &data, 0);
+    if (SUCCEEDED(hr) && data != nullptr) {
+        std::memcpy(data, a2, size);
+        this->m_vertexBuffer->lpVtbl->Unlock(this->m_vertexBuffer);
+        return true;
+    }
+
+    return false;
 }
 
 void nglDebugMesh_BuildBox(nglVertexDef_MultipassMesh<nglVertexDef_Debug_Base>::Iterator &a1,
@@ -1794,14 +1798,45 @@ void nglSetTexturePath(const char *a1) {
 
 nglFont *nglLoadFont(const tlFixedString &a1) {
     if constexpr (1) {
-        //sp_log("find = 0x%08X, sub_779FC0 = 0x%08X", find, load);
-
         nglFont *font = nglFontDirectory()->Find(a1);
         if (font == nullptr) {
-            return nglFontDirectory()->Load(a1);
+            font = nglFontDirectory()->Load(a1);
+        } else {
+            ++font->field_20;
         }
 
-        ++font->field_20;
+        if (font != nullptr) {
+            // Force mod texture reload
+            if (font->field_24 != nullptr) {
+                if (auto data = getModDataByHash(a1.GetHash())) {
+                    nglLoadTextureTM2(font->field_24, data);
+                }
+            }
+
+            // Force mod FDF reload
+            char mod_fdf[260]{};
+            snprintf(mod_fdf, sizeof(mod_fdf), "mods/%s.fdf", a1.to_string());
+            FILE *f = fopen(mod_fdf, "rb");
+            if (!f) {
+                snprintf(mod_fdf, sizeof(mod_fdf), "mods\\%s.fdf", a1.to_string());
+                f = fopen(mod_fdf, "rb");
+            }
+            if (f != nullptr) {
+                fseek(f, 0, SEEK_END);
+                long sz = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                char *buffer = (char *)malloc(sz + 1);
+                if (buffer != nullptr) {
+                    fread(buffer, 1, sz, f);
+                    buffer[sz] = '\0';
+                    sp_log("nglLoadFont: reloaded custom FDF table from %s", mod_fdf);
+                    nglParseFDF(buffer, font);
+                    free(buffer);
+                }
+                fclose(f);
+            }
+        }
+
         return font;
     } else {
         return (nglFont *) CDECL_CALL(0x007792B0, &a1);
@@ -1903,12 +1938,10 @@ nglMaterialBase *nglGetMaterialInFile(const tlFixedString &a1, nglMeshFile *Mesh
     {
         for (result = MeshFile->FirstMaterial; result != nullptr; result = result->NextMaterial)
         {
-            if (*result->Name == a1) {
+            if (result->Name != nullptr && *result->Name == a1) {
                 return result;
             }
         }
-
-        assert(0);
 
         return nullptr;
     }
@@ -1959,98 +1992,13 @@ namespace xbox
 
 void nglRebaseSection(uint32_t NewBase, uint32_t OldBase, nglMeshSection *a3)
 {
-    auto idx = NewBase - OldBase;
-
-#ifdef TARGET_XBOX
-    auto *Section = bit_cast<xbox::nglMeshSection *>(a3);
-
-    PTR_OFFSET(idx, Section->BonesIdx);
-
-    PTR_OFFSET(idx, Section->VertexBuffer.field_0);
-  
-    PTR_OFFSET(idx, Section->field_30.field_0 );
-
-    PTR_OFFSET(idx, Section->field_38);
-
-    PTR_OFFSET(idx, Section->Material);
-    
-    PTR_OFFSET(idx, Section->VertexDef);
-
-    if constexpr (0)
-    {
-        int (*arr)[sizeof(nglMeshSection) / 4] = CAST(arr, Section);
-        int i = 0;
-        for (auto &v : *arr)
-        {
-            sp_log("0x%08X %d", (i++) * 4, v);
-        }
-
-        assert(0);
-    }
-
-    a3->m_indices = static_cast<uint16_t *>(Section->field_30.field_0);
-    a3->m_vertices = Section->VertexBuffer.field_0;
-    a3->NVertices = Section->NVertices;
-    a3->field_40 = Section->VertexBuffer.Size;
-    a3->VertexDef = Section->VertexDef;
-    a3->m_stride = Section->m_stride;
-
-#else
-
-    PTR_OFFSET(idx, a3->BonesIdx);
-
-    PTR_OFFSET(idx, a3->field_3C.m_vertexData);
-
-    PTR_OFFSET(idx, a3->m_indices);
-
-    PTR_OFFSET(idx, a3->Material);
-
-    PTR_OFFSET(idx, a3->VertexDef);
-
-    auto *v9 = a3->VertexDef;
-    if (v9 != nullptr)
-    {
-        PTR_OFFSET(idx, v9->m_vtbl);
-    }
-#endif
+    CDECL_CALL(0x0077C430, NewBase, OldBase, a3);
 }
 
 void nglRebaseMesh(uint32_t NewBase, uint32_t OldBase, nglMesh *pMesh)
 {
     TRACE("nglRebaseMesh");
-
-    if constexpr (1)
-    {
-        int idx = NewBase - OldBase;
-
-        PTR_OFFSET(idx, pMesh->Bones);
-
-        PTR_OFFSET(idx, pMesh->LODs);
-
-        PTR_OFFSET(idx, pMesh->Sections);
-
-#ifndef TARGET_XBOX
-        for (int i = 0; i < pMesh->NLODs; ++i) {
-            auto &pLOD = pMesh->LODs[i];
-
-            PTR_OFFSET(idx, pLOD.field_0);
-        }
-#endif
-
-        for (auto j = 0u; j < pMesh->NSections; ++j)
-        {
-            if (pMesh->Sections[j].Section != nullptr)
-            {
-                PTR_OFFSET(idx, pMesh->Sections[j].Section);
-            }
-
-            nglRebaseSection(NewBase, OldBase, pMesh->Sections[j].Section);
-        }
-    }
-    else
-    {
-        CDECL_CALL(0x0076F340, NewBase, OldBase, pMesh);
-    }
+    CDECL_CALL(0x0076F340, NewBase, OldBase, pMesh);
 }
 
 void nglProcessMorph(nglMeshFile *MeshFile, nglDirectoryEntry *a2, int base) {
@@ -2402,7 +2350,7 @@ const char *to_string(TypeDirectoryEntry type)
     return g_str.c_str();
 }
 
-constexpr bool nglLoadMeshFileInternal_hook = 1;
+constexpr bool nglLoadMeshFileInternal_hook = 0;
 
 #ifndef TARGET_XBOX
 // imports a mesh (by optional index) and creates buffers
@@ -2604,541 +2552,8 @@ static bool nglLoadMeshFileInternalPC(const tlFixedString &FileName,
                                       const char *ext)
 {
     TRACE("nglLoadMeshFileInternal", FileName.to_string());
-
-    if constexpr (1)
-    {
-#       if MOD_MESH_SUPPORT
-            Mod* replacementMesh = getMod(MeshFile->FileName.m_hash, TLRESOURCE_TYPE_MESH_FILE);
-
-            // @todo platform
-            if (replacementMesh)
-            {
-                MeshFile->FileBuf.Buf = (char*)replacementMesh->Data.data();
-                MeshFile->FileBuf.Size = replacementMesh->Data.size();
-            }
-            else
-                replacementMesh = getMod(MeshFile->FileName.m_hash, TLRESOURCE_TYPE_MESH);
-
-#       endif
-
-        nglMeshFileHeader *Header = CAST(Header, MeshFile->FileBuf.Buf);
-
-        MeshFile->field_134 = (int) Header;
-        MeshFile->field_144 = -1;
-        if (strncmp(Header->Tag, "PCM ", 4u) != 0)
-        {
-            sp_log("Corrupted mesh file: %s%s%s.\n", nglMeshPath(), FileName.to_string(), ext);
-
-            return false;
-        }
-
-        constexpr auto version = 0x601;
-
-        if (Header->Version != version)
-        {
-            auto *v6 = FileName.to_string();
-            sp_log("Unsupported mesh file version: %s%s%s (version %x, current version is %x).\n",
-                   nglMeshPath(),
-                   v6,
-                   ext,
-                   Header->Version,
-                   version);
-
-            return false;
-        }
-
-        if (Header->NDirectoryEntries == 0)
-        {
-            auto *v7 = FileName.to_string();
-            sp_log("Mesh file hasn't any directory entries: %s%s%s.\n", nglMeshPath(), v7, ext);
-
-            return false;
-        }
-
-        {
-            auto *dir_entries = Header->DirectoryEntries;
-            sp_log("0x%08X", dir_entries);
-        }
-
-        const auto Base = bit_cast<uint32_t>(&MeshFile->FileBuf.Buf[-Header->field_10]);
-
-        nglRebaseHeader(Base, Header);
-
-        assert(Base == int(Header));
-        sp_log("Base = 0x%08X", Base);
-
-        MeshFile->FirstMesh = nullptr;
-        MeshFile->FirstMaterial = nullptr;
-        MeshFile->FirstMorph = nullptr;
-
-        uint32_t num_dir_entries = Header->NDirectoryEntries;
-        //sp_log("num_dir_entries = %d", num_dir_entries);
-
-        nglMesh *LastMesh = nullptr;
-        nglMaterialBase *LastMaterial = nullptr;
-        nglMorphSet *prevMorph = nullptr;
-
-        auto *dir_entries = Header->DirectoryEntries;
-        //sp_log("0x%08X", dir_entries);
-
-        std::for_each(dir_entries, dir_entries + num_dir_entries,
-                [&](auto &dir_entry)
-        {
-            PTR_OFFSET(Base, dir_entry.field_4.Material);
-            PTR_OFFSET(Base, dir_entry.field_8);
-
-            auto dir_entry_type = dir_entry.field_3;
-            //sp_log("dir_entry_type = %s", to_string(dir_entry_type));
-
-            switch (dir_entry_type) {
-            case TypeDirectoryEntry::MATERIAL: {
-
-                nglMaterialBase *Material = dir_entry.field_4.Material;
-
-                PTR_OFFSET(Base, Material->Name);
-                //sp_log("material_name = %s", Material->Name->to_string());
-
-                PTR_OFFSET(Base, Material->m_shader);
-
-                Material->File = MeshFile;
-                if (MeshFile->FirstMaterial == nullptr) {
-                    MeshFile->FirstMaterial = Material;
-                }
-
-                if (LastMaterial != nullptr) {
-                    LastMaterial->NextMaterial = Material;
-                }
-
-                LastMaterial = Material;
-                if (Header->field_10 == 0)
-                {
-                    auto *v17 = bit_cast<tlFixedString *>(Material->m_shader);
-                    tlHashString a2 = v17->m_hash;
-                    //sp_log("0x%08X", v17->m_hash);
-
-                    auto *v18 = nglShaderBank.Search(a2);
-                    if (v18 != nullptr)
-                    {
-                        auto *shader = static_cast<nglShader *>(v18->field_20);
-
-                        if (shader->CheckMaterialVersion(Material)) {
-                            Material->m_shader = shader;
-                        } else {
-                            auto *v27 = a2.c_str();
-                            auto v26 = Material->Version;
-                            auto *v8 = Material->Name->to_string();
-                            sp_log(
-                                "Material %s binary version (%d) is not compatible with shader "
-                                "%s.\n",
-                                v8,
-                                v26,
-                                v27);
-                            Material->m_shader = &gEmptyShader();
-                        }
-
-                    } else {
-                        auto *v28 = Material->Name->to_string();
-                        auto *v9 = a2.c_str();
-                        sp_log("NGL: Unable to find shader %s, used by material %s.\n", v9, v28);
-
-                        Material->m_shader = &gEmptyShader();
-                    }
-                }
-
-                Material->m_shader->RebaseMaterial(Material, Base);
-
-                if (0 ) //v17->m_hash == 0xFC097C8A)
-                {
-                    struct {
-                        char field_0[0x60];
-                        tlFixedString *field_60;
-                    } *mat = CAST(mat, Material);
-                    sp_log("%s", mat->field_60->to_string());
-                }
-
-
-                Material->m_shader->BindMaterial(Material);
-
-            } break;
-            case TypeDirectoryEntry::MESH: {
-
-                nglMesh *Mesh = dir_entry.field_4.Mesh;
-                PTR_OFFSET(Base, Mesh->Name);
-
-                void (__fastcall *Add)(void *, void *edx, nglMesh *) = CAST(Add, get_vfunc(nglMeshDirectory()->m_vtbl, 0x10));
-                Add(nglMeshDirectory(), nullptr, Mesh);
-
-                Mesh->File = MeshFile;
-                if (MeshFile->FirstMesh == nullptr) {
-                    MeshFile->FirstMesh = Mesh;
-                }
-
-                if (LastMesh != nullptr) {
-                    LastMesh->NextMesh = Mesh;
-                }
-
-                LastMesh = Mesh;
-                if ((Mesh->Flags & NGLMESH_PROCESSED) == 0) {
-                    nglRebaseMesh(Base, 0, Mesh);
-                }
-
-                // @todo: custom submeshes
-
-                modGenericMesh modMesh;
-                auto numCustomSubmeshes = 0;
-                if (replacementMesh) {
-                    modMesh.mod = replacementMesh;
-                    numCustomSubmeshes = modImportMesh(g_Direct3DDevice(), modMesh, (char*)replacementMesh->Data.data(), replacementMesh->Data.size(), "", 0);
-
-                    if (Mesh->NSections != numCustomSubmeshes)
-                        printf("there are %d sections in the original mesh, but we have %d.\n", Mesh->NSections, numCustomSubmeshes);
-                }
-
-
-                for (auto idx_Section = 0u; idx_Section < Mesh->NSections; ++idx_Section)
-                {
-                    Mesh->Sections[idx_Section].field_0 = 1;
-
-                    nglMeshSection *MeshSection = Mesh->Sections[idx_Section].Section;
-                    PTR_OFFSET(Base, MeshSection->MaterialName);
-
-                    MeshSection->Material = nglGetMaterialInFile(*MeshSection->MaterialName, MeshFile);
-                    if (!MeshSection->Material->m_shader->CheckVertexDefVersion(MeshSection))
-                    {
-                        tlFixedString v111 = MeshSection->Material->m_shader->GetName();
-
-                        auto *v12 = v111.to_string();
-                        sp_log(
-                            "Section VertexDef Binary version (%d) is incompatible with "
-                            "shader %s\n.",
-                            MeshSection->field_50,
-                            v12);
-                        MeshSection->Material->m_shader = &gEmptyShader();
-                    }
-
-                    auto *v27 = MeshSection->m_indices;
-                    if (v27 != nullptr) {
-                        bit_cast<nglVertexBuffer *>(&MeshSection->m_indexBuffer)
-                            ->createIndexBufferAndWriteData(v27, 2 * MeshSection->NIndices);
-                    }
-
-                    auto *v28 = MeshSection->Material;
-                    MeshSection->StartIndex = 0;
-
-
-                    tlFixedString v112 = v28->m_shader->GetName();
-                    auto* v29 = v112.to_string();
-
-#                   if MOD_MESH_DBG_REPLACE_ALL
-                        if (!replacementMesh && dbgReplaceMesh)
-                            replacementMesh = dbgReplaceMesh;
-#                   endif
-#                   if MOD_MESH_SUPPORT
-                        if (replacementMesh && numCustomSubmeshes) 
-                        {
-                            if (modImportMesh(g_Direct3DDevice(), modMesh, (char*)replacementMesh->Data.data(), replacementMesh->Data.size(), v29, idx_Section)) {
-                                nglVertexBuffer* vb = &MeshSection->field_3C;
-                                vb->createVertexBufferAndWriteData(modMesh.vertices.data(), modMesh.vertices.size() * sizeof(float), 1028);
-                                bit_cast<nglVertexBuffer*>(&MeshSection->m_indexBuffer)
-                                    ->createIndexBufferAndWriteData(modMesh.indices.data(), modMesh.indices.size() * sizeof(uint16_t));
-
-                                MeshSection->NVertices = modMesh.numVertices;
-                                MeshSection->NIndices = modMesh.numIndices;
-                                MeshSection->m_stride = modMesh.stride;
-                                MeshSection->m_primitiveType = D3DPT_TRIANGLELIST;
-                                Mesh->NSections = idx_Section; // @todo: custom submeshes
-                                continue; // skip
-                            }
-                        }
-#                   endif
-
-                    [&v29](auto *MeshSection) -> void {
-                        auto func = [](auto *MeshSection)
-                        {
-                            auto v31 = (uint32_t) (MeshSection->field_3C.Size >> 6);
-
-                            auto *v32 = (float *) (MeshSection->field_3C.m_vertexData +
-                                                   32);
-                            MeshSection->field_5C = 2;
-                            for (; v31 != 0; --v31)
-                            {
-                                if (equal(v32[7], 0.0f)) {
-                                    if (not_equal(v32[6], 0.0f) && MeshSection->field_5C < 3u) {
-                                        MeshSection->field_5C = 3;
-                                    }
-                                } else {
-                                    MeshSection->field_5C = 4;
-                                }
-
-                                *(uint32_t *) v32 = v32[0];
-
-                                *((uint32_t *) v32 + 1) = v32[1];
-
-                                *((uint32_t *) v32 + 2) = v32[2];
-                                *((uint32_t *) v32 + 3) = v32[3];
-                                v32 += 16;
-                            }
-
-                            MeshSection->field_3C.createVertexBufferAndWriteData(MeshSection->field_3C.m_vertexData,
-                                                                 MeshSection->field_3C.Size,
-                                                                 1028);
-
-                            static Var<int> dword_973BC8{0x00973BC8};
-
-                            if (dword_973BC8() < (int) (24 * (MeshSection->field_3C.Size >> 6))) {
-                                dword_973BC8() = 24 * (MeshSection->field_3C.Size >> 6);
-                            }
-
-                            MeshSection->m_stride = 24;
-                        };
-
-                        if (!EnableShader())
-                        {
-                            sp_log("debug0");
-                            if (strncmp(v29, "uslod", 5u) == 0)
-                            {
-                                sp_log("debug1");
-
-                                nglVertexBuffer::createIndexOrVertexBuffer(
-                                    &MeshSection->field_3C,
-                                    ResourceType::VertexBuffer,
-                                    16 * (MeshSection->field_3C.Size / 12),
-                                    520,
-                                    0,
-                                    D3DPOOL_DEFAULT);
-                                MeshSection->m_stride = 16;
-                                MeshSection->field_5C = 0;
-                                return;
-                            }
-
-                            if (!EnableShader())
-                            {
-                                if (ChromeEffect())
-                                {
-                                    if (strncmp(v29, "smshiny", 7u) == 0)
-                                    {
-                                        int v30 = 48 * (MeshSection->field_3C.Size / 60u);
-                                        MeshSection->field_3C
-                                            .createVertexBuffer(v30, 520u);
-                                        MeshSection->m_stride = 48;
-
-                                        static Var<int> dword_972960{0x00972960};
-
-                                        if (dword_972960() < v30) {
-                                            dword_972960() = v30;
-                                        }
-
-                                        return;
-                                    }
-                                }
-                                else
-                                {
-                                    sp_log("debug2");
-                                    if (!EnableShader())
-                                    {
-                                        if (strncmp(v29, "usperson", 8u) == 0)
-                                        {
-                                            func(MeshSection);
-                                            return;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (strncmp(v29, "us_character", 12u) == 0)
-                        {
-                            func(MeshSection);
-                            return;
-                        }
-                        
-
-                        MeshSection->field_3C.createVertexBufferAndWriteData(MeshSection->field_3C.m_vertexData,
-                                                             MeshSection->field_3C.Size,
-                                                             1028);
-                    }(MeshSection);
-
-                    if (auto *v39 = MeshSection->VertexDef; v39 != nullptr) {
-                        tlHashString a1 = *(tlHashString *) v39->m_vtbl;
-                        auto *v40 = nglVertexDefBank().Search(a1);
-                        if (v40 != nullptr) {
-                            MeshSection->VertexDef->field_4 = MeshSection;
-
-                            void (*func)(void *) = CAST(func, v40->field_20);
-                            func(MeshSection->VertexDef);
-                        } else {
-                            MeshSection->VertexDef = nullptr;
-                        }
-                    }
-
-                    if (auto *v41 = MeshSection->Material; v41 != nullptr)
-                    {
-                        if (auto *v42 = v41->m_shader; v42 != nullptr) {
-                            v42->BindSection(MeshSection);
-                        }
-                    }
-                }
-
-            } break;
-            case TypeDirectoryEntry::MORPH: {
-                nglMorphSet *new_morph = CAST(new_morph, dir_entry.field_4);
-                nglProcessMorph(MeshFile, &dir_entry, Base);
-                if (prevMorph != nullptr) {
-                    prevMorph->field_10 = new_morph;
-                }
-
-                prevMorph = new_morph;
-            } break;
-            default: {
-                auto *v14 = FileName.to_string();
-
-                sp_log(
-                    "nglLoadMeshFile: file \"%s%s%s\" has an unknown directory entry ( %u ), "
-                    "skipping.\n",
-                    nglMeshPath(),
-                    v14,
-                    ext,
-                    uint32_t(dir_entry_type));
-
-                break;
-            }
-            }
-        });
-
-        if (LastMesh != nullptr) {
-            LastMesh->NextMesh = nullptr;
-        }
-
-        if (LastMaterial != nullptr) {
-            LastMaterial->NextMaterial = nullptr;
-        }
-
-        vector4d a3a;
-        a3a[0] = 1.0e32;
-        a3a[1] = 1.0e32;
-        a3a[2] = 1.0e32;
-
-        vector4d v103;
-        v103[0] = -1.0e32;
-        v103[1] = -1.0e32;
-        v103[2] = -1.0e32;
-        v103[3] = -a3a[3];
-
-        bool v46 = false;
-
-        for (auto *Mesh = MeshFile->FirstMesh; Mesh != nullptr; Mesh = Mesh->NextMesh)
-        {
-            if ((Mesh->Flags & NGLMESH_PROCESSED) == 0)
-            {
-                if (Mesh->NBones != 0)
-                {
-                    for (int i = 0; i < Mesh->NBones; ++i) {
-                        Mesh->Bones[i] = sub_4150E0(Mesh->Bones[i]);
-                    }
-
-                    auto v89 = Mesh->field_20[0];
-                    auto v90 = Mesh->field_20[1];
-                    auto v91 = Mesh->field_20[2];
-                    auto v93 = Mesh->field_20[3];
-                    auto v73 = Mesh->SphereRadius;
-
-                    vector4d v96;
-                    v96[0] = v89 - v73;
-                    v96[1] = v90 - v73;
-                    v96[2] = v91 - v73;
-                    v96[3] = v93 - v73;
-
-                    a3a = sub_401270(v96, a3a);
-
-                    vector4d v110;
-                    v110[0] = v89 + v73;
-                    v110[1] = v90 + v73;
-                    v110[2] = v91 + v73;
-                    v110[3] = v93 + v73;
-
-                    v103 = sub_4012F0(v110, v103);
-
-                    v46 = true;
-                }
-                else
-                {
-                    Mesh->Flags |= NGLMESH_PROCESSED;
-                }
-
-                auto *Lods = Mesh->LODs;
-                for (int i = 0; i < Mesh->NLODs; ++i)
-                {
-                    Mesh->LODs[i].field_0 = nglGetMeshInFile(*bit_cast<const tlFixedString *>(
-                                                                 Lods[i].field_0),
-                                                             MeshFile);
-                    Lods = Mesh->LODs;
-                    if (Lods[i].field_0 == nullptr) {
-                        --i;
-                        --Mesh->NLODs;
-                    }
-                }
-            }
-        }
-
-        if (v46)
-        {
-            auto v60 = sub_411750(a3a, v103);
-
-            vector4d v96;
-            v96[0] = v60[0] * 0.5f;
-            v96[1] = v60[1] * 0.5f;
-            v96[2] = v60[2] * 0.5f;
-            v96[3] = v60[3] * 0.5f;
-
-            auto v69 = 0.0f;
-    
-            auto *v67 = MeshFile->FirstMesh;
-            for (; v67 != nullptr; v67 = v67->NextMesh)
-            {
-                if ((v67->Flags & NGLMESH_PROCESSED) == 0)
-                {
-                    a3a[0] = v96[0] - v67->field_20[0];
-                    a3a[1] = v96[1] - v67->field_20[1];
-                    a3a[2] = v96[2] - v67->field_20[2];
-                    a3a[3] = v96[3] - v67->field_20[3];
-                    auto v76 = vector3d {a3a[0], a3a[1], a3a[2]}.length() + v67->SphereRadius;
-                    if (v69 <= v76) {
-                        v69 = v76;
-                    }
-                }
-            }
-
-            for (auto *Mesh = v67; Mesh != nullptr; Mesh = Mesh->NextMesh)
-            {
-                if ((Mesh->Flags & NGLMESH_PROCESSED) == 0)
-                {
-                    Mesh->SphereRadius = v69;
-                    Mesh->field_20[0] = v96[0];
-                    Mesh->field_20[1] = v96[1];
-                    Mesh->field_20[2] = v96[2];
-                    Mesh->field_20[3] = v96[3];
-                    Mesh->Flags |= NGLMESH_PROCESSED;
-                }
-            }
-        }
-
-        if constexpr (0)
-        {
-            if (std::string {"ultimate_spiderman"} == FileName.to_string()) {
-                assert(0);
-            }
-        }
-
-        Header->field_10 = (int) MeshFile->FileBuf.Buf;
-        return true;
-    }
-    else
-    {
-        bool (*func)(const tlFixedString &, nglMeshFile *, const char *) = CAST(func, 0x0076F500);
-        auto result = func(FileName, MeshFile, ext);
-    }
-    return true;
-
+    bool (*func)(const tlFixedString &, nglMeshFile *, const char *) = CAST(func, 0x0076F500);
+    return func(FileName, MeshFile, ext);
 }
 
 bool nglLoadMeshFileInternal(const tlFixedString &FileName,
@@ -3183,7 +2598,7 @@ nglMesh *nglGetMeshInFile(const tlFixedString &a1, nglMeshFile *a2)
 {
     TRACE("nglGetMeshInFile", a1.to_string());
 
-    if constexpr (1)
+    if constexpr (0)
     {
         for (auto *result = a2->FirstMesh; result != nullptr; result = result->NextMesh)
         {
@@ -3724,11 +3139,24 @@ nglTexture *nglLoadTexture(const tlFixedString &a1)
 
         auto Find = vtbl->Find;
 
-        //sp_log("0x%08X", bit_cast<std::intptr_t>(Find));
-
         nglTexture *tex = Find(nglTextureDirectory(), 0, &a1);
         if (tex == nullptr) {
-            return vtbl->Load(nglTextureDirectory(), 0, &a1);
+            printf("[TEX_DBG] nglLoadTexture: '%s' (hash: 0x%08X) NOT found in directory, calling Load (StandardLoad)\n", a1.to_string(), a1.GetHash());
+            auto *loaded = vtbl->Load(nglTextureDirectory(), 0, &a1);
+            printf("[TEX_DBG] nglLoadTexture: StandardLoad returned tex=%p for '%s'\n", loaded, a1.to_string());
+            if (loaded != nullptr) {
+                printf("[TEX_DBG] nglLoadTexture: loaded tex dimensions: %dx%d, DXTexture=%p\n",
+                       loaded->m_width, loaded->m_height, loaded->DXTexture);
+            }
+            return loaded;
+        }
+
+        printf("[TEX_DBG] nglLoadTexture: '%s' (hash: 0x%08X) FOUND in directory, tex=%p (%dx%d)\n",
+               a1.to_string(), a1.GetHash(), tex, tex->m_width, tex->m_height);
+
+        if (auto data = getModDataByHash(a1.GetHash())) {
+            printf("[TEX_DBG] nglLoadTexture: applying mod override for '%s'\n", a1.to_string());
+            nglLoadTextureTM2(tex, data);
         }
 
         ++tex->field_8;
@@ -3744,12 +3172,21 @@ nglTexture *nglLoadTexture(const tlHashString &a1)
 
     auto v1 = a1.GetHash();
 
-    nglTexture * (__fastcall *Find)(void *, void *, uint32_t) = CAST(Find, get_vfunc(nglTextureDirectory()->m_vtbl, 0x8));
+    struct Vtbl {
+        char field_0[0x8];
+        nglTexture * (__fastcall *Find)(void *, void *, uint32_t);
+        int field_C[4];
+        nglTexture * (__fastcall *Load)(void *, void *, const tlHashString *);
+    };
 
-    auto *tex = Find(nglTextureDirectory(), nullptr, v1);
+    auto *vtbl = bit_cast<Vtbl *>(nglTextureDirectory()->m_vtbl);
+    auto *tex = vtbl->Find(nglTextureDirectory(), nullptr, v1);
     if (tex == nullptr) {
-        nglTexture * (__fastcall *Load)(void *, void *, const tlHashString *) = CAST(Load, get_vfunc(nglTextureDirectory()->m_vtbl, 0x20));
-        return Load(nglTextureDirectory(), nullptr, &a1);
+        return vtbl->Load(nglTextureDirectory(), nullptr, &a1);
+    }
+
+    if (auto data = getModDataByHash(v1)) {
+        nglLoadTextureTM2(tex, data);
     }
 
     ++tex->field_8;
@@ -3758,6 +3195,22 @@ nglTexture *nglLoadTexture(const tlHashString &a1)
 
 nglFont *create_and_parse_fdf(const tlFixedString &a1, char *a2)
 {
+    printf("[FONT_DBG] create_and_parse_fdf: requested font '%s' (hash: 0x%08X)\n", a1.to_string(), a1.GetHash());
+    printf("[FONT_DBG] Mods map has %zu entries\n", Mods.size());
+    
+    // Check if this font's hash exists in Mods
+    auto modIt = Mods.find(a1.GetHash());
+    if (modIt != Mods.end()) {
+        printf("[FONT_DBG] Found mod entry for hash 0x%08X: path='%s', type=%d, data_size=%zu\n",
+               a1.GetHash(), modIt->second.Path.string().c_str(), modIt->second.Type, modIt->second.Data.size());
+    } else {
+        printf("[FONT_DBG] NO mod entry found for hash 0x%08X\n", a1.GetHash());
+        // List all mod hashes for debugging
+        for (auto& [h, m] : Mods) {
+            printf("[FONT_DBG]   available mod: hash=0x%08X path='%s' type=%d\n", h, m.Path.string().c_str(), m.Type);
+        }
+    }
+    
     auto *mem = tlMemAlloc(sizeof(nglFont), 8u, 0x1000000u);
     auto *font = new (mem) nglFont {};
     font->field_20 = 1;
@@ -3765,7 +3218,65 @@ nglFont *create_and_parse_fdf(const tlFixedString &a1, char *a2)
     font->m_blend_mode = NGLBM_BLEND;
     font->field_0 = a1;
     font->field_24 = nglLoadTexture(a1);
+
+    printf("[FONT_DBG] nglLoadTexture returned tex=%p for '%s'\n", font->field_24, a1.to_string());
+
+    if (font->field_24 != nullptr) {
+        printf("[FONT_DBG] tex dimensions: %dx%d, DXTexture=%p\n",
+               font->field_24->m_width, font->field_24->m_height, font->field_24->DXTexture);
+        if (auto data = getModDataByHash(a1.GetHash())) {
+            printf("[FONT_DBG] Forcing mod texture override on font '%s' (tex: %p, data: %p)\n", a1.to_string(), font->field_24, data);
+            nglLoadTextureTM2(font->field_24, data);
+            printf("[FONT_DBG] After override: tex dimensions: %dx%d, DXTexture=%p\n",
+                   font->field_24->m_width, font->field_24->m_height, font->field_24->DXTexture);
+        } else {
+            printf("[FONT_DBG] getModDataByHash returned NULL for '%s' (hash: 0x%08X) - NO OVERRIDE\n", a1.to_string(), a1.GetHash());
+        }
+    } else {
+        printf("[FONT_DBG] WARNING: nglLoadTexture returned NULL for '%s'!\n", a1.to_string());
+    }
+
+    char mod_fdf[260]{};
+    snprintf(mod_fdf, sizeof(mod_fdf), "mods/%s.fdf", a1.to_string());
+    FILE *f = fopen(mod_fdf, "rb");
+    if (!f) {
+        snprintf(mod_fdf, sizeof(mod_fdf), "mods\\%s.fdf", a1.to_string());
+        f = fopen(mod_fdf, "rb");
+    }
+
+    // Always dump original FDF data for analysis
+    if (a2 != nullptr) {
+        char dump_path[260]{};
+        snprintf(dump_path, sizeof(dump_path), "mods/%s_original.fdf", a1.to_string());
+        FILE *dump = fopen(dump_path, "w");
+        if (dump) {
+            fprintf(dump, "%s", a2);
+            fclose(dump);
+            printf("[FONT_DBG] Dumped original FDF to %s\n", dump_path);
+        }
+    }
+
+    if (f != nullptr) {
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        char *buffer = (char *)malloc(sz + 1);
+        if (buffer != nullptr) {
+            fread(buffer, 1, sz, f);
+            buffer[sz] = '\0';
+            printf("[FONT_DBG] Loaded custom FDF table from %s (sz: %ld)\n", mod_fdf, sz);
+            nglParseFDF(buffer, font);
+            free(buffer);
+            fclose(f);
+            return font;
+        }
+        fclose(f);
+    } else {
+        printf("[FONT_DBG] No custom FDF found at '%s'\n", mod_fdf);
+    }
+
     nglParseFDF(a2, font);
+    printf("[FONT_DBG] Used built-in FDF for '%s'\n", a1.to_string());
     return font;
 }
 
@@ -4188,9 +3699,33 @@ bool nglLoadTextureTM2(nglTexture *tex, uint8_t *a2)
     if constexpr (1) {
         bool result = false;
         
-        
         if (auto data = getModDataByHash(tex->field_60.m_hash)) {
             a2 = data;
+        }
+
+        if (a2 != nullptr && *(uint32_t *)a2 == 0x20534444) { // "DDS "
+            tex->m_height = *(uint32_t *)&a2[12];
+            tex->m_width = *(uint32_t *)&a2[16];
+
+            if (tex->DXTexture != nullptr) {
+                tex->DXTexture->lpVtbl->Release(tex->DXTexture);
+                tex->DXTexture = nullptr;
+            }
+
+            uint32_t pitch_or_size = *(uint32_t *)&a2[20];
+            uint32_t total_sz = pitch_or_size * tex->m_height + 128;
+            if (total_sz < 128) {
+                total_sz = tex->m_width * tex->m_height * 4 + 128;
+            }
+
+            auto hr = (HRESULT)STDCALL(0x007CA291, g_Direct3DDevice(), a2, total_sz, &tex->DXTexture);
+            if (SUCCEEDED(hr) && tex->DXTexture != nullptr) {
+                tex->sub_774F20();
+                tex->field_38 = -1;
+                printf("[TEX_DBG] nglLoadTextureTM2: Direct3D texture created for '%s' (%dx%d, ptr: %p)\n",
+                       tex->field_60.to_string(), tex->m_width, tex->m_height, tex->DXTexture);
+                return true;
+            }
         }
 
         if ( nglLoadTextureTM2_internal(tex, bit_cast<nglTextureInfo *>(a2)) ) {
@@ -4625,6 +4160,39 @@ void nglListAddString(nglFont* a1, Float a2, Float a3, Float a4, unsigned int a5
     nglListAddString(a1, buffer, a2, a3, a4, a5, a6, a8);
 }
 
+static void utf8_to_cp1254_str(const char *src, unsigned char *dst, size_t dst_max) {
+    if (!src || !dst || dst_max == 0) return;
+    size_t d = 0;
+    const unsigned char *s = reinterpret_cast<const unsigned char *>(src);
+    while (*s && d + 1 < dst_max) {
+        if (*s < 0x80) {
+            dst[d++] = *s++;
+        } else if (*s == 0xC3 && *(s + 1)) {
+            unsigned char c2 = *(s + 1);
+            dst[d++] = static_cast<unsigned char>(0x40 + c2);
+            s += 2;
+        } else if (*s == 0xC4 && *(s + 1)) {
+            unsigned char c2 = *(s + 1);
+            if (c2 == 0x9E) dst[d++] = 0xD0; // �
+            else if (c2 == 0x9F) dst[d++] = 0xF0; // ğ
+            else if (c2 == 0xB0) dst[d++] = 0xDD; // İ
+            else if (c2 == 0xB1) dst[d++] = 0xFD; // ı
+            else dst[d++] = c2;
+            s += 2;
+        } else if (*s == 0xC5 && *(s + 1)) {
+            unsigned char c2 = *(s + 1);
+            if (c2 == 0x90) dst[d++] = 0xDD; // İ (U+0130)
+            else if (c2 == 0x9E) dst[d++] = 0xDE; // �
+            else if (c2 == 0x9F) dst[d++] = 0xFE; // ş
+            else dst[d++] = c2;
+            s += 2;
+        } else {
+            dst[d++] = *s++;
+        }
+    }
+    dst[d] = '\0';
+}
+
 void nglListAddString(nglFont *font,
                       const char *a2,
                       Float a3,
@@ -4645,11 +4213,15 @@ void nglListAddString(nglFont *font,
 
         if (a2 != nullptr && a2[0] != '\0' && font != nullptr && font->field_24 != nullptr)
         {
+            if (strcmp(font->field_0.to_string(), "nglSysFont") != 0) {
+                printf("[DRAW_STRING] font='%s', tex_w=%d, tex_h=%d, text='%s'\n",
+                       font->field_0.to_string(), font->field_24->m_width, font->field_24->m_height, a2);
+            }
             auto *v8 = new nglStringNode{};
 
             auto v9 = strlen(a2) + 1;
             v8->field_C = static_cast<unsigned char *>(nglListAlloc(v9, 16));
-            memcpy(v8->field_C, a2, v9);
+            utf8_to_cp1254_str(a2, v8->field_C, v9);
             v8->m_color = color;
             v8->field_14 = a3;
             v8->field_18 = a4;
@@ -4855,7 +4427,14 @@ void nglRotateQuad(nglQuad *a2, Float a3, Float a4, Float a5)
 }
 
 void sub_781980(int width, int height) {
-    CDECL_CALL(0x00781980, width, height);
+    static Var<nglTexture *[2]> dword_975A10{0x00975A10};
+    for (int i = 0; i < 2; ++i) {
+        auto *tex = nglCreateTexture(0x1101, width, height, 0, 1);
+        if (tex != nullptr) {
+            tex->field_34 |= 2;
+            dword_975A10()[i] = tex;
+        }
+    }
 }
 
 void sub_771B60() {
@@ -4911,7 +4490,9 @@ void create_front_and_back_buffer_tex() {
 }
 
 void nglReleaseFont(nglFont *font) {
-    CDECL_CALL(0x007793E0, font);
+    if (font != nullptr) {
+        CDECL_CALL(0x007793E0, font);
+    }
 }
 
 void sub_77B2F0(bool a1) {
@@ -5827,7 +5408,12 @@ void ngl_patch()
     {
         HRESULT (*func)(nglMeshSection *) = &nglSetStreamSourceAndDrawPrimitive;
         SET_JUMP(0x00771AF0, func);
+    }
 
+    {
+        void (*p_nglListAddString)(nglFont *, const char *,
+                Float, Float, Float, uint32_t, Float, Float) = &nglListAddString;
+        SET_JUMP(0x00779C40, p_nglListAddString);
     }
 
     REDIRECT(0x0076D44F, sub_77EBD0);
@@ -5891,7 +5477,7 @@ void ngl_patch()
 
     SET_JUMP(0x0077A870, nglLoadTextureTM2);
 
-    SET_JUMP(0x00507690, FastListAddMesh);
+    // SET_JUMP(0x00507690, FastListAddMesh); // disabled recursion
 
     REDIRECT(0x004F9BB3, nglListAddMesh);
 
@@ -5932,6 +5518,8 @@ void ngl_patch()
 
     SET_JUMP(0x00773350, nglCanReleaseTexture);
 
+    //SET_JUMP(0x0076DC30, nglSetSamplerState);
+
     SET_JUMP(0x0076E050, nglListInit);
 
     SET_JUMP(0x0076EA10, nglListSend);
@@ -5947,6 +5535,7 @@ void ngl_patch()
     SET_JUMP(0x0077AB30, nglConstructTexture);
 
     SET_JUMP(0x007791A0, create_and_parse_fdf);
+    //SET_JUMP(0x007792B0, nglLoadFont);
 
 
     {
@@ -5964,32 +5553,10 @@ void ngl_patch()
         REDIRECT(0x0076FD55, func);
     }
 
-    REDIRECT(0x0076F727, nglRebaseMesh);
-
-    {
-        REDIRECT(0x0064302D, nglLoadMeshFile);
-    }
-
-
+    // Internal mesh function redirects removed to allow pure native USM.EXE execution
     {
         nglTexture *(*func)(const tlFixedString &) = &nglLoadTexture;
         REDIRECT(0x004100D0, func);
-    }
-
-    {
-        REDIRECT(0x0076F873, nglVertexBuffer::createIndexOrVertexBuffer);
-    }
-
-    {
-        FUNC_ADDRESS(address, &nglVertexBuffer::createIndexBufferAndWriteData);
-        REDIRECT(0x0076F814, address);
-    }
-
-    {
-        auto func = &nglVertexBuffer::createVertexBufferAndWriteData;
-        FUNC_ADDRESS(address, func);
-        REDIRECT(0x0076F9B0, address);
-        REDIRECT(0x0076F9E9, address);
     }
 
     us_outline_patch();

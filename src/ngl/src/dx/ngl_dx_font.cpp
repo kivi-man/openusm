@@ -42,7 +42,7 @@ void nglStringNode::Render()
         return;
     }
 
-    if constexpr (0)
+    if constexpr (1)
     {
         if ( this->field_C != nullptr )
         {
@@ -150,38 +150,51 @@ void nglStringNode::Render()
                         v23[0] = sub_77E940(v23[0]);
                         v23[1] = sub_77EA00(v23[1]);
 
-                        float v35[24];
-                        v35[0] = v21[0];
-                        v35[1] = v21[1];
-                        v35[3] = v8;
-                        v35[2] = v27;
-                        v35[4] = a5[0];
-                        v35[5] = a5[1];
-                        v35[6] = v23[0];
-                        v35[7] = v21[1];
-                        v35[8] = v27;
-                        v35[9] = v8;
-                        v35[10] = v31[0];
-                        v35[11] = a5[1];
-                        v35[12] = v21[0];
-                        v35[13] = v23[1];
-                        v35[14] = v27;
-                        v35[15] = v8;
-                        v35[16] = a5[0];
-                        v35[17] = v31[1];
-                        v35[18] = v23[0];
-                        v35[19] = v23[1];
-                        v35[20] = v27;
-                        v35[21] = v8;
-                        v35[22] = v31[0];
-                        v35[23] = v31[1];
+                        struct FontVertex {
+                            float x, y, z;
+                            uint32_t color;
+                            float u, v;
+                        };
+
+                        FontVertex v35[4];
+                        // Vertex 0: Top-Left
+                        v35[0].x = v21[0];
+                        v35[0].y = v21[1];
+                        v35[0].z = (float)v27;
+                        v35[0].color = v8;
+                        v35[0].u = a5[0];
+                        v35[0].v = a5[1];
+
+                        // Vertex 1: Top-Right
+                        v35[1].x = v23[0];
+                        v35[1].y = v21[1];
+                        v35[1].z = (float)v27;
+                        v35[1].color = v8;
+                        v35[1].u = v31[0];
+                        v35[1].v = a5[1];
+
+                        // Vertex 2: Bottom-Left
+                        v35[2].x = v21[0];
+                        v35[2].y = v23[1];
+                        v35[2].z = (float)v27;
+                        v35[2].color = v8;
+                        v35[2].u = a5[0];
+                        v35[2].v = v31[1];
+
+                        // Vertex 3: Bottom-Right
+                        v35[3].x = v23[0];
+                        v35[3].y = v23[1];
+                        v35[3].z = (float)v27;
+                        v35[3].color = v8;
+                        v35[3].u = v31[0];
+                        v35[3].v = v31[1];
 
                         g_Direct3DDevice()->lpVtbl->DrawPrimitiveUP(
                                 g_Direct3DDevice(),
                                 D3DPT_TRIANGLESTRIP,
                                 2,
                                 v35,
-                                24);
+                                sizeof(FontVertex));
                         double v18 = this->field_10->GetFontCellWidth(v11);
                         if ( v18 < 0 ) {
                             v18 += flt_86F860();

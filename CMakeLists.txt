@@ -349,7 +349,7 @@ target_link_directories(binkw32 PUBLIC ${CMAKE_FIND_ROOT_PATH}/include)
 target_link_directories(binkw32 PUBLIC ${CMAKE_FIND_ROOT_PATH}/lib)
 target_link_libraries(binkw32 PUBLIC physics)
 target_link_libraries(binkw32 PUBLIC charanimtype mash chuck nfl ngl nal nsl utility)
-target_link_libraries(binkw32 PUBLIC winmm psapi d3d9 dinput8 dxguid dsound assimp z)
+target_link_libraries(binkw32 PUBLIC winmm psapi d3d9 dinput8 dxguid dsound assimp z setupapi hid)
 
 
 if(USE_GLM)

@@ -1,4 +1,7 @@
 #include "forwards.h"
+#include "ps4_controller.h"
+#include "pc_joypad_device.h"
+#include "inputsettings.h"
 
 #include "aeps.h"
 #include "ai_find_best_swing_anchor.h"
@@ -197,6 +200,9 @@
 #include "rumble_manager.h"
 #include "scene_anim.h"
 #include "scene_anim_resource_handler.h"
+#include "subtitle_manager.h"
+#include <imagehlp.h>  // for IMAGE_IMPORT_DESCRIPTOR walk
+
 #include "scratchpad_stack.h"
 #include "script.h"
 #include "script_access.h"
@@ -320,11 +326,11 @@ void register_class_and_create_window(LPCSTR lpClassName,
 
 DWORD old_perms = 0;
 BOOL set_text_to_writable() {
-    return VirtualProtect((void *) TEXT_START, TEXT_END - TEXT_START, PAGE_READWRITE, &old_perms);
+    return VirtualProtect((void *) TEXT_START, TEXT_END - TEXT_START, PAGE_EXECUTE_READWRITE, &old_perms);
 }
 
 BOOL restore_text_perms() {
-    return VirtualProtect((void*)(TEXT_START), TEXT_END - TEXT_START, old_perms, &old_perms);
+    return TRUE;
 }
 
 void ToggleFullScreen(bool isFullscreen)
@@ -332,12 +338,18 @@ void ToggleFullScreen(bool isFullscreen)
     ESI_CALL(0x0076D230, isFullscreen);
 
     // fix focus adjustment
-    os_developer_options::instance->set_flag(mString{ "ALWAYS_ACTIVE" }, g_config.WindowedMode);
+    if (os_developer_options::instance != nullptr) {
+        os_developer_options::instance->set_flag(mString{ "ALWAYS_ACTIVE" }, g_config.WindowedMode);
+    }
 }
 
 
 void init_hook(HWND hwnd) {
-    os_developer_options::instance->set_flag(mString{ "NO_LOAD_SCREEN" }, g_config.NoLoadScreen);
+    printf("[DEBUG] init_hook called (hwnd=%p)\n", hwnd);
+    fflush(stdout);
+    if (os_developer_options::instance != nullptr) {
+        os_developer_options::instance->set_flag(mString{ "NO_LOAD_SCREEN" }, g_config.NoLoadScreen);
+    }
 
     bool windowedMode = g_config.WindowedMode;
 
@@ -423,20 +435,8 @@ BOOL install_patches()
         REDIRECT(0x0078DD5E, readFile);    // skeletons
 
 
-        FUNC_ADDRESS(address, &mesh_file_resource_handler::_handle_resource);
-        set_vfunc(0x00888A44, address);
-        
-        {
-            FUNC_ADDRESS(address, &nglTexture::CreateTextureOrSurface);
-            SET_JUMP(0x00775000, address);
-        }
-
-        {
-            HRESULT(*func)(nglMeshSection*) = &nglSetStreamSourceAndDrawPrimitive;
-            SET_JUMP(0x00771AF0, func);
-        }
-
-        REDIRECT(0x0056BDAA, nglLoadMeshFileInternal);
+        // Mesh file resource handler: use fully native USM.EXE pipeline.
+        // Do NOT hook vtable[0xC] or 0x0056BDAA - native mesh loader handles all packs.
 
         // these funcs mysteriously are only used for TGA
         // and kinda look like it too, but I don't see em being used...
@@ -444,7 +444,33 @@ BOOL install_patches()
         REDIRECT(0x0077ABDE, tga_hook);
         REDIRECT(0x0077AB01, tga_hook);
         REDIRECT(0x0077A1D8, tga_hook);
+
+        SET_JUMP(0x007791A0, create_and_parse_fdf);
     }
+
+    {
+        extern void proximity_map_stack_patch();
+        proximity_map_stack_patch();
+
+        extern void region_patch();
+        region_patch();
+
+        extern void mission_manager_patch();
+        mission_manager_patch();
+
+        extern void render_data_ents_patch();
+        render_data_ents_patch();
+
+        extern void fe_mini_map_widget_patch();
+        fe_mini_map_widget_patch();
+
+        extern void loaded_regions_cache_patch();
+        loaded_regions_cache_patch();
+
+        extern void subtitle_manager_patch();
+        subtitle_manager_patch();
+    }
+
     sp_log("Patches have been installed\n");
 
     return TRUE;
@@ -527,8 +553,121 @@ void sub_597720(LPCSTR lpText) {
     exit(-1);
 }
 
+LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS *pExceptionInfo) {
+    if (!pExceptionInfo || !pExceptionInfo->ExceptionRecord) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    auto code = (unsigned long)pExceptionInfo->ExceptionRecord->ExceptionCode;
+
+    // Only intercept fatal crash exceptions!
+    if (code != EXCEPTION_ACCESS_VIOLATION &&
+        code != EXCEPTION_ILLEGAL_INSTRUCTION &&
+        code != EXCEPTION_STACK_OVERFLOW &&
+        code != 0xC0000374 && // STATUS_HEAP_CORRUPTION
+        code != EXCEPTION_INT_DIVIDE_BY_ZERO &&
+        code != EXCEPTION_PRIV_INSTRUCTION &&
+        code != EXCEPTION_IN_PAGE_ERROR)
+    {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    auto addr = (uintptr_t)pExceptionInfo->ExceptionRecord->ExceptionAddress;
+    if (addr >= 0x00619000 && addr <= 0x00619300) {
+        ExitProcess(0);
+    }
+    FILE *flog = fopen("openusm.log", "a");
+    FILE *fcrash = fopen("crash.txt", "w");
+    auto log_line = [&](const char *fmt, ...) {
+        va_list va;
+        va_start(va, fmt);
+        vprintf(fmt, va);
+        va_end(va);
+        if (flog) {
+            va_start(va, fmt);
+            vfprintf(flog, fmt, va);
+            va_end(va);
+            fflush(flog);
+        }
+        if (fcrash) {
+            va_start(va, fmt);
+            vfprintf(fcrash, fmt, va);
+            va_end(va);
+            fflush(fcrash);
+        }
+    };
+
+    log_line("\n=======================================================\n");
+    log_line("[CRASH DETECTED!] Exception Code: 0x%08lX\n", code);
+    log_line("[CRASH ADDRESS] 0x%08lX\n", (unsigned long)addr);
+
+    if (code == EXCEPTION_ACCESS_VIOLATION) {
+        log_line("[ACCESS VIOLATION] Attempted to %s address 0x%08lX\n",
+            pExceptionInfo->ExceptionRecord->ExceptionInformation[0] == 1 ? "WRITE" : "READ",
+            (unsigned long)pExceptionInfo->ExceptionRecord->ExceptionInformation[1]);
+    }
+
+    if (pExceptionInfo->ContextRecord) {
+        auto &ctx = *pExceptionInfo->ContextRecord;
+        log_line("[REGISTERS] EIP: 0x%08lX | EAX: 0x%08lX | EBX: 0x%08lX | ECX: 0x%08lX\n",
+            (unsigned long)ctx.Eip, (unsigned long)ctx.Eax, (unsigned long)ctx.Ebx, (unsigned long)ctx.Ecx);
+        log_line("            EDX: 0x%08lX | ESI: 0x%08lX | EDI: 0x%08lX | EBP: 0x%08lX | ESP: 0x%08lX\n",
+            (unsigned long)ctx.Edx, (unsigned long)ctx.Esi, (unsigned long)ctx.Edi, (unsigned long)ctx.Ebp, (unsigned long)ctx.Esp);
+
+        log_line("[STACK DUMP (ESP)]:\n");
+        auto *sp = (uint32_t *)ctx.Esp;
+        if (sp) {
+            for (int i = 0; i < 128; ++i) {
+                if (!IsBadReadPtr(&sp[i], sizeof(uint32_t))) {
+                    uint32_t val = sp[i];
+                    char module_info[128] = "";
+                    HMODULE hMod = nullptr;
+                    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)(uintptr_t)val, &hMod) && hMod) {
+                        char modName[MAX_PATH] = "";
+                        GetModuleFileNameA(hMod, modName, sizeof(modName));
+                        char *slash = strrchr(modName, '\\');
+                        const char *baseModName = slash ? slash + 1 : modName;
+                        snprintf(module_info, sizeof(module_info), "  [%s + 0x%lX]", baseModName, (unsigned long)(val - (uintptr_t)hMod));
+                    }
+                    log_line("  ESP+0x%03X: 0x%08lX%s\n", i * 4, (unsigned long)val, module_info);
+                }
+            }
+        }
+
+        log_line("\n[CALL STACK (EBP WALK)]:\n");
+        uint32_t *cur_ebp = (uint32_t *)ctx.Ebp;
+        int frame = 0;
+        while (cur_ebp && frame < 32) {
+            if (IsBadReadPtr(cur_ebp, sizeof(uint32_t) * 2)) break;
+            uint32_t ret_addr = cur_ebp[1];
+            if (!ret_addr) break;
+            char mod_info[128] = "";
+            HMODULE hMod = nullptr;
+            if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)(uintptr_t)ret_addr, &hMod) && hMod) {
+                char modName[MAX_PATH] = "";
+                GetModuleFileNameA(hMod, modName, sizeof(modName));
+                char *slash = strrchr(modName, '\\');
+                const char *baseModName = slash ? slash + 1 : modName;
+                snprintf(mod_info, sizeof(mod_info), " [%s + 0x%lX]", baseModName, (unsigned long)(ret_addr - (uintptr_t)hMod));
+            }
+            log_line("  Frame %02d: 0x%08lX%s\n", frame++, (unsigned long)ret_addr, mod_info);
+            uint32_t *next_ebp = (uint32_t *)cur_ebp[0];
+            if (next_ebp <= cur_ebp || (uintptr_t)next_ebp - (uintptr_t)cur_ebp > 0x100000) break;
+            cur_ebp = next_ebp;
+        }
+    }
+    log_line("=======================================================\n");
+
+    if (flog) fclose(flog);
+    if (fcrash) fclose(fcrash);
+    fflush(stdout);
+
+    ExitProcess((UINT)code);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
 LONG __stdcall TopLevelExceptionFilter(EXCEPTION_POINTERS *pExceptionInfo) {
-    return (LONG) STDCALL(0x00597830, pExceptionInfo);
+    return CustomCrashHandler(pExceptionInfo);
 }
 
 uint8_t color_ramp_function(float ratio, int period_duration, int cur_time) {
@@ -615,6 +754,8 @@ void replace_if_find(char *begin, char *end, const char &a3, const char &a4) {
 
 void parse_cmd(const char *str)
 {
+    printf("[DEBUG] parse_cmd called: %s\n", str ? str : "null");
+    fflush(stdout);
     TRACE("parse_cmd");
 
     if constexpr (1) {
@@ -2107,6 +2248,8 @@ void register_class_and_create_window(LPCSTR lpClassName,
                                       HINSTANCE hInstance,
                                       int a9,
                                       DWORD dwStyle) {
+    printf("[DEBUG] register_class_and_create_window called (%s, %s)\n", lpClassName ? lpClassName : "", lpWindowName ? lpWindowName : "");
+    fflush(stdout);
     if (g_appHwnd()) {
         DestroyWindow(g_appHwnd());
         g_appHwnd() = nullptr;
@@ -2118,8 +2261,10 @@ void register_class_and_create_window(LPCSTR lpClassName,
     create_window(lpClassName, lpWindowName, hInstance, X, Y, a5, a6, (int)wnd);
 }
 
-unsigned int hook_controlfp(unsigned int, unsigned int) {
-    return {};
+unsigned int hook_controlfp(unsigned int a1, unsigned int a2) {
+    printf("[DEBUG] hook_controlfp called (%u, %u)\n", a1, a2);
+    fflush(stdout);
+    return 0;
 }
 
 void initterm(const _PVFV *ppfn, const _PVFV *end) {
@@ -2519,8 +2664,11 @@ GetDeviceState_ptr GetDeviceStateOriginal = nullptr;
 HRESULT __stdcall GetDeviceStateHook(IDirectInputDevice8* self, DWORD cbData, LPVOID lpvData) {
 
 	HRESULT res = GetDeviceStateOriginal(self, cbData, lpvData);
+	if (FAILED(res) || !lpvData) {
+		return res;
+	}
 
-	printf("cbData %d %d %d\n", cbData, sizeof(DIJOYSTATE), sizeof(DIJOYSTATE2));
+	//printf("cbData %d %d %d\n", cbData, sizeof(DIJOYSTATE), sizeof(DIJOYSTATE2));
 
 	//keyboard time babyyy
     if (cbData == 256)
@@ -2549,9 +2697,6 @@ HRESULT __stdcall GetDeviceStateHook(IDirectInputDevice8* self, DWORD cbData, LP
         if (debug_enabled) {
             menu_input_handler(keyboard, 5);
         }
-    }
-    if (debug_enabled) {
-        memset(lpvData, 0, cbData);
     }
 
 
@@ -2731,21 +2876,17 @@ HRESULT  __stdcall IDirectInput8CreateDeviceHook(IDirectInput8W* self, const GUI
 	if (IsEqualGUID(GUID_SysKeyboard, *guid))
     {
 		sp_log("Found the keyboard");
-    }
-	else
-    {
-		sp_log("Hooking something different...maybe a controller");
-    }
 
-    if (GetDeviceStateOriginal == nullptr) {
-        GetDeviceStateOriginal = (GetDeviceState_ptr)
-            HookVTableFunction((void *) *device, (void *) GetDeviceStateHook, 9);
-    }
+        if (GetDeviceStateOriginal == nullptr) {
+            GetDeviceStateOriginal = (GetDeviceState_ptr)
+                HookVTableFunction((void *) *device, (void *) GetDeviceStateHook, 9);
+        }
 
-    if (GetDeviceDataOriginal == nullptr) {
-        GetDeviceDataOriginal = (GetDeviceData_ptr) HookVTableFunction((void *) *device,
-                                                                       (void *) GetDeviceDataHook,
-                                                                       10);
+        if (GetDeviceDataOriginal == nullptr) {
+            GetDeviceDataOriginal = (GetDeviceData_ptr) HookVTableFunction((void *) *device,
+                                                                           (void *) GetDeviceDataHook,
+                                                                           10);
+        }
     }
 
 	return res;
@@ -2755,7 +2896,22 @@ typedef HRESULT(__stdcall* DirectInput8Create_ptr)(HINSTANCE hinst, DWORD dwVers
 HRESULT __stdcall HookDirectInput8Create(HINSTANCE hinst, DWORD dwVersion, REFIID riidltf, LPVOID* ppvOut, LPUNKNOWN punkOuter)
 {
 	DirectInput8Create_ptr caller = (decltype(caller)) *(void**)0x00987944;
+	if (caller == nullptr) {
+		HMODULE hDInput = GetModuleHandleA("dinput8.dll");
+		if (hDInput == nullptr) {
+			hDInput = LoadLibraryA("dinput8.dll");
+		}
+		if (hDInput != nullptr) {
+			caller = (DirectInput8Create_ptr)GetProcAddress(hDInput, "DirectInput8Create");
+		}
+	}
+	if (caller == nullptr) {
+		return E_FAIL;
+	}
 	HRESULT res = caller(hinst, dwVersion, riidltf, ppvOut, punkOuter);
+	if (FAILED(res) || ppvOut == nullptr || *ppvOut == nullptr) {
+		return res;
+	}
 
 	IDirectInput8* iDir = (IDirectInput8 *) (*ppvOut);
 
@@ -2787,6 +2943,8 @@ unsigned int nglColor(int r, int g, int b, int a)
 //typedef void (*nglSetClearFlags_ptr)(int);
 //nglSetClearFlags_ptr nglSetClearFlags = (nglSetClearFlags_ptr)0x00769DB0;
 
+#include "subtitle_manager.h"
+
 void aeps_RenderAll() {
     static int cur_time = 0;
     int period = 60;
@@ -2797,10 +2955,11 @@ void aeps_RenderAll() {
     uint8_t green = color_ramp_function(ratio, period, cur_time);
     uint8_t blue = color_ramp_function(ratio, period, cur_time - 2 * period);
 
-    nglListAddString(*nglSysFont, 0.1f, 0.2f, 0.2f, nglColor(red, green, blue, 255), 1.f, 1.f, "Krystalgamer's Debug menu");
+    if (nglSysFont() != nullptr) {
+        nglListAddString(*nglSysFont, 0.1f, 0.2f, 0.2f, nglColor(red, green, blue, 255), 1.f, 1.f, "Krystalgamer's Debug menu");
+    }
 
     cur_time = (cur_time + 1) % duration;
-
 
     aeps_RenderAll_orig();
 }
@@ -3677,11 +3836,102 @@ void render_current_debug_menu() {
     }
 }
 
-void debug_nglListEndScene_hook() {
-    g_console->render();
+// -----------------------------------------------------------------------
+// Heap crash guard – fixes recurring 0xC0000005 crashes in ntdll RtlFreeHeap
+// caused by the game calling free() with a null or corrupted heap pointer.
+// We walk USM.exe's IAT, find the MSVCR71.dll::free entry, and replace it
+// with a wrapper that validates the pointer first.
+// -----------------------------------------------------------------------
+static void (__cdecl *s_real_msvcr71_free)(void *) = nullptr;
 
-    if (debug_enabled) 
+static void __cdecl safe_free_guard(void *ptr) {
+    // Win32 reserves the lower 64 KB; any pointer below that is invalid.
+    // Passing such a pointer to RtlFreeHeap causes the observed crash.
+    if (!ptr || (uintptr_t)ptr < 0x10000u) {
+        sp_log("[HeapGuard] Skipped bad free(%p)", ptr);
+        return;
+    }
+    if (s_real_msvcr71_free)
+        s_real_msvcr71_free(ptr);
+}
+
+static void install_heap_crash_guard() {
+    HMODULE msvcr = GetModuleHandleA("MSVCR71.dll");
+    if (!msvcr) {
+        sp_log("[HeapGuard] MSVCR71.dll not loaded – skip");
+        return;
+    }
+
+    s_real_msvcr71_free = (decltype(s_real_msvcr71_free))
+                          GetProcAddress(msvcr, "free");
+    if (!s_real_msvcr71_free) {
+        sp_log("[HeapGuard] free() not found in MSVCR71.dll – skip");
+        return;
+    }
+
+    // Walk the IAT of USM.exe to find the thunk that resolves to MSVCR71::free
+    HMODULE usm = GetModuleHandleA("USM.exe");
+    if (!usm) return;
+
+    auto *dos  = (IMAGE_DOS_HEADER *)usm;
+    auto *nt   = (IMAGE_NT_HEADERS *)((uint8_t *)usm + dos->e_lfanew);
+    auto &idir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    auto *desc = (IMAGE_IMPORT_DESCRIPTOR *)((uint8_t *)usm + idir.VirtualAddress);
+
+    int patched = 0;
+    for (; desc->Name; ++desc) {
+        const char *dll = (const char *)((uint8_t *)usm + desc->Name);
+        if (_stricmp(dll, "MSVCR71.dll") != 0) continue;
+
+        auto *thunk = (IMAGE_THUNK_DATA *)((uint8_t *)usm + desc->FirstThunk);
+        for (; thunk->u1.Function; ++thunk) {
+            if ((void *)(uintptr_t)thunk->u1.Function == (void *)s_real_msvcr71_free) {
+                DWORD old;
+                VirtualProtect(&thunk->u1.Function, sizeof(DWORD),
+                               PAGE_READWRITE, &old);
+                thunk->u1.Function = (DWORD)(uintptr_t)safe_free_guard;
+                VirtualProtect(&thunk->u1.Function, sizeof(DWORD), old, &old);
+                ++patched;
+                sp_log("[HeapGuard] Patched IAT free() thunk at %p → safe_free_guard",
+                       &thunk->u1.Function);
+                // No break: patch ALL thunks pointing to free() in this descriptor
+            }
+        }
+        // No break: walk ALL MSVCR71 import descriptors (there may be more than one)
+    }
+
+    // Also directly verify and patch the known import stub slot used by the crash path
+    // (0x0086F2D4 feeds the JMP thunk at 0x0082207C called from 0x00504BA3)
+    static const DWORD s_known_slots[] = { 0x0086F2D4u, 0x0086F35Cu, 0u };
+    for (int k = 0; s_known_slots[k]; ++k) {
+        DWORD *slot = (DWORD *)s_known_slots[k];
+        if (*slot == (DWORD)(uintptr_t)s_real_msvcr71_free) {
+            DWORD old;
+            VirtualProtect(slot, sizeof(DWORD), PAGE_READWRITE, &old);
+            *slot = (DWORD)(uintptr_t)safe_free_guard;
+            VirtualProtect(slot, sizeof(DWORD), old, &old);
+            ++patched;
+            sp_log("[HeapGuard] Patched known slot 0x%08X → safe_free_guard", s_known_slots[k]);
+        }
+    }
+
+    sp_log("[HeapGuard] IAT patch complete: %d thunk(s) redirected", patched);
+}
+
+void debug_nglListEndScene_hook() {
+
+    ps4_controller::instance().update();
+
+    if (g_console != nullptr) {
+        g_console->render();
+    }
+
+    if (debug_enabled && current_menu != nullptr && nglSysFont() != nullptr) 
         render_current_debug_menu();
+
+    // Subtitles rendered last (after all debug/console draws), at Z=-9999 so
+    // they appear above standard UI. This is the actual winning hook at 0x0052B5D7.
+    subtitle_manager::render();
 
     nglListEndScene();
 }
@@ -4484,7 +4734,7 @@ BOOL install_redirects()
 
     if constexpr (1)
     {
-        moved_entities_patch();
+        // moved_entities_patch(); - Disabled to let native USM.EXE handle moved entity queue
 
         pc_joypad_device_patch();
 
@@ -4496,7 +4746,7 @@ BOOL install_redirects()
 
         mouselook_controller_patch();
 
-        web_zip_state_patch();
+        // web_zip_state_patch(); - Disabled to let native USM.EXE handle web zip
 
         lookat_target_controller_patch();
 
@@ -4562,20 +4812,125 @@ BOOL install_redirects()
 
     SET_JUMP(0x0077A870, nglLoadTextureTM2);
 
-    SET_JUMP(0x5EF340, inverse_kinematics::compute_bend_plane_normal);
-    SET_JUMP(0x5EEEE0, inverse_kinematics::compute_arm_elbow_bend_direction);
-    //SET_JUMP(0x5EF100, inverse_kinematics::compute_arm_elbow_bend_direction_mirrored);
-
-    SET_JUMP(0x797210, inverse_kinematics::nalIKMap2DTo3D);
-    SET_JUMP(0x797070, inverse_kinematics::nalIKSolve2D);
-    SET_JUMP(0x5EEC20, inverse_kinematics::solve_two_bone);
-    SET_JUMP(0x5F16E0, inverse_kinematics::DecomposeIKSpin);
-    // need renaming^
-
-    //SET_JUMP(0x5FD6D0, inverse_kinematics::LegsIK_BuildPerInstData);
-    SET_JUMP(0x5FC770, inverse_kinematics::quat_blend);
+    // Disabled broken C++ inverse_kinematics hooks that made Peter's model invisible during idle
+    // SET_JUMP(0x5EF340, inverse_kinematics::compute_bend_plane_normal);
+    // SET_JUMP(0x5EEEE0, inverse_kinematics::compute_arm_elbow_bend_direction);
+    // SET_JUMP(0x797210, inverse_kinematics::nalIKMap2DTo3D);
+    // SET_JUMP(0x797070, inverse_kinematics::nalIKSolve2D);
+    // SET_JUMP(0x5EEC20, inverse_kinematics::solve_two_bone);
+    // SET_JUMP(0x5F16E0, inverse_kinematics::DecomposeIKSpin);
+    // SET_JUMP(0x5FC770, inverse_kinematics::quat_blend);
 
     localized_string_table_patch();
+    FileUSM_patch();
+    pc_joypad_device_patch();
+    FEMultiLineText_patch();
+
+    // city_lod_patch(); - Disabled misaligned hook so native city_lod::render (0x00540380) renders distant buildings!
+    resource_streaming_expansion_patch();
+    spiderman_camera_patch();
+
+
+    // Increase HD world streaming distance, distance fader, and far clip planes to 1,200m - 1,500m
+    {
+        DWORD oldProtect;
+
+        // 1. Terrain Streaming Distance (2500m - safe max HD streaming)
+        VirtualProtect((void *)0x00921DA4, 4, PAGE_EXECUTE_READWRITE, &oldProtect);
+        *(float *)0x00921DA4 = 2500.0f;
+        VirtualProtect((void *)0x00921DA4, 4, oldProtect, &oldProtect);
+
+        // 2. Camera Proj Far Plane & Far Clip Plane (4500m - covers entire Manhattan island)
+        VirtualProtect((void *)0x00921E2C, 8, PAGE_EXECUTE_READWRITE, &oldProtect);
+        *(float *)0x00921E2C = 4500.0f; // PROJ_FAR_PLANE_D
+        *(float *)0x00921E30 = 4500.0f; // FAR_CLIP_PLANE
+        VirtualProtect((void *)0x00921E2C, 8, oldProtect, &oldProtect);
+
+        // 3. Distance Fader: Set generous safe ranges so Peter Parker & Spider-Man NEVER disappear (500m minimum!)
+        // and buildings scale up to 4,500m - 100,000m
+        VirtualProtect((void *)0x00921E48, 128, PAGE_EXECUTE_READWRITE, &oldProtect);
+        float *fade_dist = (float *)0x00921E48;
+        float *fade_dist2 = (float *)0x00921E88;
+        for (int i = 0; i < 10; ++i) {
+            fade_dist[i] = 500.0f;  // Peter Parker, Spider-Man, all characters & props visible up to 500m!
+        }
+        fade_dist[10] = 750.0f;
+        fade_dist[11] = 1200.0f;
+        fade_dist[12] = 2000.0f;
+        fade_dist[13] = 3000.0f;
+        fade_dist[14] = 4500.0f; // Large buildings & blocks
+        fade_dist[15] = 100000.0f; // Infinite
+        for (int i = 0; i < 16; ++i) {
+            fade_dist2[i] = fade_dist[i] * fade_dist[i];
+        }
+        VirtualProtect((void *)0x00921E48, 128, oldProtect, &oldProtect);
+
+        // 4. TRUE HD CITY RENDERING ENGINE OVERRIDES:
+        // A. At 0x0054721A: NOP out region culling branch (74 14 -> 90 90)
+        //    Forces build_render_data_regions to add ALL streamed districts/regions into render list!
+        VirtualProtect((void *)0x0054721A, 2, PAGE_EXECUTE_READWRITE, &oldProtect);
+        memset((void *)0x0054721A, 0x90, 2);
+        VirtualProtect((void *)0x0054721A, 2, oldProtect, &oldProtect);
+
+        // B. At 0x0053CF0A & 0x0053CF4E: Override render_meshes distance caps to 3500.0f!
+        //    All HD building walls, windows, and structures are rendered up to 3,500m!
+        VirtualProtect((void *)0x0053CF0A, 4, PAGE_EXECUTE_READWRITE, &oldProtect);
+        *(float *)0x0053CF0A = 3500.0f;
+        VirtualProtect((void *)0x0053CF0A, 4, oldProtect, &oldProtect);
+
+        VirtualProtect((void *)0x0053CF4E, 4, PAGE_EXECUTE_READWRITE, &oldProtect);
+        *(float *)0x0053CF4E = 3500.0f;
+        VirtualProtect((void *)0x0053CF4E, 4, oldProtect, &oldProtect);
+
+        // C. At 0x0053D381: Override render_legos distance cap to 3000.0f!
+        //    All modular building details (rooftops, fences, fire escapes) rendered up to 3,000m!
+        VirtualProtect((void *)0x0053D381, 4, PAGE_EXECUTE_READWRITE, &oldProtect);
+        *(float *)0x0053D381 = 3000.0f;
+        VirtualProtect((void *)0x0053D381, 4, oldProtect, &oldProtect);
+
+        // D. Native city_lod::render (0x0054B2E2) is kept ACTIVE:
+        //    Restore native conditional jump (74 1C -> je 0x0054B300)
+        VirtualProtect((void *)0x0054B2E2, 2, PAGE_EXECUTE_READWRITE, &oldProtect);
+        const uint8_t restore_boxes[] = { 0x74, 0x1C };
+        memcpy((void *)0x0054B2E2, restore_boxes, 2);
+        VirtualProtect((void *)0x0054B2E2, 2, oldProtect, &oldProtect);
+
+        // E. Restore native strip loop at 0x00540532 so strips are processed uniformly:
+        VirtualProtect((void *)0x00540532, 10, PAGE_EXECUTE_READWRITE, &oldProtect);
+        const uint8_t native_strip_check[] = {
+            0x75, 0x08,             // jne 0x0054053C
+            0x8A, 0x44, 0x24, 0x24, // mov al, BYTE PTR [esp+0x24]
+            0x84, 0xC0,             // test al, al
+            0x74, 0x4A              // je 0x00540586
+        };
+        memcpy((void *)0x00540532, native_strip_check, 10);
+        VirtualProtect((void *)0x00540532, 10, oldProtect, &oldProtect);
+
+        // F. Set city_lod MAX strip distance thresholds to 4500m squared (20,250,000.0f):
+        //    Allows the engine to evaluate strips all the way to the 4500m far plane.
+        VirtualProtect((void *)0x00921F0C, 8, PAGE_EXECUTE_READWRITE, &oldProtect);
+        *(float *)0x00921F0C = 20250000.0f; // 4500m * 4500m (high altitude)
+        *(float *)0x00921F10 = 20250000.0f; // 4500m * 4500m (low altitude)
+        VirtualProtect((void *)0x00921F0C, 8, oldProtect, &oldProtect);
+
+        // G. NATIVE PER-BUILDING CITY LOD THRESHOLD AT 0x008899E8:
+        //    Beenox natively checks every single building distance against 0x008899E8:
+        //    If dist2 < 0x008899E8 -> SKIP BUILDING (no box)!
+        //    If dist2 >= 0x008899E8 -> DRAW BUILDING BOX!
+        //    Originally, Beenox hardcoded 21,609.0f (147m * 147m).
+        //    We adjust it to 480m squared (230,400.0f):
+        //    - ALL buildings within 480m (nearby and HD stream) have ZERO boxes drawn!
+        //    - ALL buildings 480m+ where HD buildings end have their boxes drawn right at the seam!
+        VirtualProtect((void *)0x008899E8, 4, PAGE_EXECUTE_READWRITE, &oldProtect);
+        *(float *)0x008899E8 = 230400.0f; // 480m * 480m (HD binalarin bittigi tam sinir)
+        VirtualProtect((void *)0x008899E8, 4, oldProtect, &oldProtect);
+    }
+
+
+
+
+
+
 
     if (!install_xbpack_support()) {
         return false;
@@ -4585,6 +4940,9 @@ BOOL install_redirects()
     path_resource_handler_patch();
     state_graph_patch();
 #endif
+
+    // Guard against the recurring MSVCR71 free(NULL/corrupt) crash in ntdll
+    install_heap_crash_guard();
 
     return true;
 
@@ -4628,11 +4986,11 @@ BOOL install_redirects()
         vm_executable_patch();
     }
 
+    us_lod_patch();
+
     if constexpr (0)
     {
         us_decal_patch();
-
-        us_lod_patch();
 
         us_translucentshader_patch();
 
@@ -4665,8 +5023,6 @@ BOOL install_redirects()
 
         game_camera_patch();
 
-        region_patch();
-        
         matrix4x4_patch();
 
         ai_interaction_data_patch();
@@ -4677,17 +5033,12 @@ BOOL install_redirects()
 
         city_lod_patch();
 
-        swing_inode_patch();
-
-        swing_state_patch();
-
-        jump_state_patch();
-
-        polytube_patch();
-
-        web_interface_patch();
-
-        web_polytube_patch();
+        // swing_inode_patch(); - Disabled to let native USM.EXE handle swing physics/pendulums
+        // swing_state_patch(); - Disabled to let native USM.EXE handle swing state transitions
+        // jump_state_patch(); - Disabled to let native USM.EXE handle jump & swing release physics
+        // polytube_patch(); - Disabled to let native USM.EXE render web lines directly
+        // web_interface_patch(); - Disabled to let native USM.EXE advance web interfaces
+        // web_polytube_patch(); - Disabled to let native USM.EXE advance web polytubes
 
         entity_patch();
 
@@ -4695,9 +5046,9 @@ BOOL install_redirects()
 
         beam_patch();
 
-        motion_effect_struct_patch();
+        // motion_effect_struct_patch(); - Disabled to let native USM.EXE render motion trails
 
-        ngl_vertexdef_patch();
+        // ngl_vertexdef_patch(); - Disabled to let native USM.EXE draw character meshes and UVs
 
         actor_patch();
 
@@ -4751,7 +5102,7 @@ BOOL install_redirects()
 
         nglShader_patch();
 
-        mission_manager_patch();
+        // mission_manager_patch();
     }
 
     if constexpr (0)
@@ -4863,6 +5214,12 @@ BOOL install_redirects()
 
         spawnable_patch();
 
+        extern void ps4_controller_patch();
+        ps4_controller_patch();
+
+        extern void rumble_manager_patch();
+        rumble_manager_patch();
+
         ai_path_patch();
 
         ai_core_patch();
@@ -4902,13 +5259,10 @@ BOOL install_redirects()
 
         anim_handle_patch();
 
-        plr_loco_crawl_state_patch();
-
-        plr_loco_crawl_transition_state_patch();
-
-        ai_player_controller_patch();
-
-        ai_state_machine_patch();
+        // plr_loco_crawl_state_patch(); - Disabled: native crawl state
+        // plr_loco_crawl_transition_state_patch(); - Disabled: native crawl transition
+        // ai_player_controller_patch(); - Disabled: native player controller
+        // ai_state_machine_patch(); - Disabled: native AI state machine
 
         line_info_patch();
         
@@ -4916,11 +5270,9 @@ BOOL install_redirects()
 
         hierarchical_entity_proximity_map_patch();
 
-        spidey_base_state_patch();
-
-        hero_base_state_patch();
-        
-        enhanced_state_patch();
+        // spidey_base_state_patch(); - Disabled: native Spidey state machine
+        // hero_base_state_patch(); - Disabled: native hero base state machine
+        // enhanced_state_patch(); - Disabled: native enhanced state machine
 
         CharComponentBase_patch();
         
@@ -5048,7 +5400,7 @@ BOOL install_redirects()
 
         rigid_body_patch();
 
-        swing_anchor_finder_patch();
+        // swing_anchor_finder_patch(); - Disabled: native swing anchor finder
 
         USVariantShaderNode_patch();
 
@@ -5194,9 +5546,8 @@ BOOL install_redirects()
 
         nglRenderList_patch();
 
-        swing_anchor_obbfilter_patch();
-
-        quick_anchor_info_patch();
+        // swing_anchor_obbfilter_patch(); - Disabled: native swing anchor OBB filter
+        // quick_anchor_info_patch(); - Disabled: native swing anchor sort
 
         glass_house_manager_patch();
 
@@ -5204,9 +5555,8 @@ BOOL install_redirects()
 
         FileUSM_patch();
 
-        ai_state_machine_patch();
-
-        state_graph_patch();
+        // ai_state_machine_patch(); - Disabled: native state machine
+        // state_graph_patch(); - Disabled: native state graph
 
         character_viewer_patch();
 
@@ -5218,9 +5568,8 @@ BOOL install_redirects()
 
         alternate_costumes_patch();
 
-        combat_state_patch();
-
-        line_anchor_patch();
+        // combat_state_patch(); - Disabled: native combat & web hang
+        // line_anchor_patch(); - Disabled: native line anchor
 
         resource_partition_patch();
 
@@ -5228,7 +5577,7 @@ BOOL install_redirects()
 
         nglMesh_patch();
 
-        pole_swing_state_patch();
+        // pole_swing_state_patch(); - Disabled: native pole swing
 
         physics_inode_patch();
 
@@ -5293,9 +5642,11 @@ void enumerate_mods() {
             else if (ext == ".pcmesh")  // @todo: other exts
                 resType = TLRESOURCE_TYPE_MESH_FILE;
 
-            auto hash = to_hash(path.stem().string().c_str());
-            Mods[hash] = Mod{path, resType, std::move(fileData)};
-            printf("name = %s\nhash = 0x%08X\n", path.stem().string().c_str(), hash);
+            if (resType != TLRESOURCE_TYPE_NONE) {
+                auto hash = to_hash(path.stem().string().c_str());
+                Mods[hash] = Mod{path, resType, std::move(fileData)};
+                printf("name = %s (type=%d)\nhash = 0x%08X\n", path.stem().string().c_str(), resType, hash);
+            }
         }
     }
 
@@ -5313,6 +5664,8 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD fdwReason, [[maybe_unused]] LPVOID lpvReser
     //printf("DLLMain %lu 0x%08X\n", fdwReason, (int) lpvReserved);
 
     if (fdwReason == DLL_PROCESS_ATTACH) {
+        SetUnhandledExceptionFilter(CustomCrashHandler);
+
         char *args = GetCommandLine();
         if (strstr(args, " -console")) {
             g_config.DebugMode = true;
@@ -5324,8 +5677,7 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD fdwReason, [[maybe_unused]] LPVOID lpvReser
             }
         }
 
-        if (strstr(args, " -windowed"))
-            g_config.WindowedMode = true;
+        g_config.WindowedMode = true;
         
         if (strstr(args, " -noloadscreen"))
             g_config.NoLoadScreen = true;
@@ -5333,6 +5685,8 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD fdwReason, [[maybe_unused]] LPVOID lpvReser
         bool res = install_hooks();
         if (res) 
             enumerate_mods();
+        printf("[DEBUG] DllMain finished successfully (res=%d), passing control to USM.exe\n", res);
+        fflush(stdout);
         return res;
 
     } else if (fdwReason == DLL_PROCESS_DETACH) {

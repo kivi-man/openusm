@@ -665,11 +665,11 @@ void nglListSend(bool Flip)
             v9 += flt_86F860();
         }
 
-        sp_log("v9 = %f, PCFreq = %f", v9, PCFreq());
+        // sp_log("v9 = %f, PCFreq = %f", v9, PCFreq());
         nglPerfInfo().field_6C = v9 / PCFreq();
         nglPerfInfo().field_5C = nglPerfInfo().field_5C + nglPerfInfo().field_6C;
         nglPerfInfo().m_fps = 1000.f / nglPerfInfo().field_6C;
-        sp_log("nglPerfInfo.m_fps == %f", nglPerfInfo().m_fps);
+        // sp_log("nglPerfInfo.m_fps == %f", nglPerfInfo().m_fps);
 
         nglPerfInfo().field_60 = nglPerfInfo().field_5C * 0.001f;
         if ( nglDebug().ScreenShot ) {

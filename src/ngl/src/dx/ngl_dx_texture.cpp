@@ -119,6 +119,10 @@ void nglSetSamplerState(DWORD sampler, D3DSAMPLERSTATETYPE type, DWORD value)
 {
     if constexpr (1)
     {
+        if (type == D3DSAMP_MAGFILTER || type == D3DSAMP_MINFILTER) {
+            value = D3DTEXF_LINEAR;
+        }
+
         auto result = type + 14 * sampler;
         auto *v4 = (DWORD *) (4 * result + 0x971FF0);
 

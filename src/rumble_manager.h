@@ -53,3 +53,5 @@ struct rumble_manager {
     //0x005BA520
     void get_current_rumble_info(rumble_struct &a2);
 };
+
+extern void rumble_manager_patch();

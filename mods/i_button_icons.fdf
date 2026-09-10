@@ -1,0 +1,35 @@
+version 0x0102
+cellheight 116 ascent 96
+firstglyph 32 numglyphs 31
+; char bmofsx bmofsy cellwidth glyphofsx glyphofsy glyphwidth glyphheight
+ 32 x 4 y 96 w 52 gx 0 gy 96 gw 40 gh 40
+ 33 x 48 y 24 w 112 gx 8 gy 24 gw 112 gh 112
+ 34 x 164 y 24 w 112 gx 8 gy 24 gw 112 gh 112
+ 35 x 280 y 24 w 112 gx 8 gy 24 gw 112 gh 112
+ 36 x 396 y 24 w 112 gx 8 gy 24 gw 112 gh 112
+ 37 x 512 y 24 w 112 gx 8 gy 24 gw 112 gh 112
+ 38 x 628 y 24 w 112 gx 8 gy 24 gw 112 gh 112
+ 39 x 744 y 24 w 112 gx 8 gy 24 gw 112 gh 112
+ 40 x 860 y 24 w 112 gx 8 gy 24 gw 112 gh 112
+ 41 x 4 y 152 w 112 gx 8 gy 24 gw 112 gh 112
+ 42 x 120 y 152 w 112 gx 8 gy 24 gw 112 gh 112
+ 43 x 236 y 152 w 112 gx 8 gy 24 gw 112 gh 112
+ 44 x 352 y 152 w 112 gx 8 gy 24 gw 112 gh 112
+ 45 x 468 y 152 w 112 gx 8 gy 24 gw 112 gh 112
+ 46 x 584 y 152 w 112 gx 8 gy 24 gw 112 gh 112
+ 47 x 700 y 152 w 112 gx 8 gy 24 gw 112 gh 112
+ 48 x 816 y 152 w 112 gx 8 gy 24 gw 112 gh 112
+ 49 x 4 y 280 w 112 gx 8 gy 24 gw 112 gh 112
+ 50 x 120 y 280 w 112 gx 8 gy 24 gw 112 gh 112
+ 51 x 236 y 280 w 112 gx 8 gy 24 gw 112 gh 112
+ 52 x 352 y 280 w 112 gx 8 gy 24 gw 112 gh 112
+ 53 x 468 y 280 w 112 gx 8 gy 24 gw 112 gh 112
+ 54 x 584 y 280 w 112 gx 8 gy 24 gw 112 gh 112
+ 55 x 700 y 280 w 112 gx 8 gy 24 gw 112 gh 112
+ 56 x 816 y 280 w 112 gx 8 gy 24 gw 112 gh 112
+ 57 x 4 y 408 w 112 gx 8 gy 24 gw 112 gh 112
+ 58 x 120 y 408 w 112 gx 8 gy 24 gw 112 gh 112
+ 59 x 236 y 408 w 112 gx 8 gy 24 gw 112 gh 112
+ 60 x 352 y 408 w 112 gx 8 gy 24 gw 112 gh 112
+ 61 x 468 y 408 w 184 gx 8 gy 24 gw 188 gh 112
+ 62 x 660 y 408 w 184 gx 8 gy 24 gw 188 gh 112

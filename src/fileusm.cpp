@@ -80,33 +80,115 @@ char *get_msg(FileUSM *a1, const char *a2) {
     return result;
 }
 
+static void convert_buffer_utf8_to_cp1254(char *buf, int &len) {
+    if (!buf || len <= 0) return;
+    int src_i = 0;
+    int dst_i = 0;
+    const unsigned char *s = reinterpret_cast<const unsigned char *>(buf);
+    while (src_i < len) {
+        unsigned char c = s[src_i];
+        if (c < 0x80) {
+            buf[dst_i++] = c;
+            src_i++;
+        } else if (c == 0xC3 && src_i + 1 < len) {
+            unsigned char c2 = s[src_i + 1];
+            buf[dst_i++] = static_cast<char>(0x40 + c2);
+            src_i += 2;
+        } else if (c == 0xC4 && src_i + 1 < len) {
+            unsigned char c2 = s[src_i + 1];
+            if (c2 == 0x9E) buf[dst_i++] = static_cast<char>(0xD0); // Ğ
+            else if (c2 == 0x9F) buf[dst_i++] = static_cast<char>(0xF0); // ğ
+            else if (c2 == 0xB0) buf[dst_i++] = static_cast<char>(0xDD); // İ
+            else if (c2 == 0xB1) buf[dst_i++] = static_cast<char>(0xFD); // ı
+            else buf[dst_i++] = static_cast<char>(c2);
+            src_i += 2;
+        } else if (c == 0xC5 && src_i + 1 < len) {
+            unsigned char c2 = s[src_i + 1];
+            if (c2 == 0x90) buf[dst_i++] = static_cast<char>(0xDD); // İ
+            else if (c2 == 0x9E) buf[dst_i++] = static_cast<char>(0xDE); // Ş
+            else if (c2 == 0x9F) buf[dst_i++] = static_cast<char>(0xFE); // ş
+            else buf[dst_i++] = static_cast<char>(c2);
+            src_i += 2;
+        } else {
+            buf[dst_i++] = c;
+            src_i++;
+        }
+    }
+    buf[dst_i] = '\0';
+    len = dst_i;
+}
+
 FileUSM::FileUSM(const char *a2, char *a3) {
     this->field_0 = nullptr;
     this->field_4 = nullptr;
     this->field_8 = 0;
     this->field_C = 0;
 
-    char Filename[260];
-    strcpy(Filename, a2);
-    if (a3 != nullptr) {
-        sub_81C5D0("dat", Filename);
+    FILE *v4 = nullptr;
+    bool is_plain_text = false;
+
+    // Check for mods/ override first, then local plain text files
+    const char *candidates[] = {
+        "mods/usm_ltr.usm",
+        "mods/usm_ltr.txt",
+        "usm_ltr.usm",
+        "usm_ltr.txt",
+        "mods/usm_lte.usm",
+        "mods/usm_lte.txt",
+        "usm_lte.usm",
+        "usm_lte.txt",
+        nullptr
+    };
+
+    for (int i = 0; candidates[i] != nullptr; ++i) {
+        v4 = fopen(candidates[i], "rb");
+        if (v4 != nullptr) {
+            is_plain_text = true;
+            printf("[FileUSM] Loaded plain text language file: '%s'\n", candidates[i]);
+            break;
+        }
     }
 
-    FILE *v4 = fopen(Filename, "rb");
+    if (v4 == nullptr) {
+        char Filename[260];
+        strcpy(Filename, a2);
+        if (a3 != nullptr) {
+            sub_81C5D0("dat", Filename);
+        }
+        v4 = fopen(Filename, "rb");
+        if (v4 != nullptr) {
+            printf("[FileUSM] Loaded default dat file: '%s'\n", Filename);
+        }
+    }
+
     FILE *v5 = v4;
     if (v4) {
-        int v6 = ftell(v4);
         fseek(v5, 0, 2);
         int v7 = ftell(v5);
-        fseek(v5, v6, 0);
+        fseek(v5, 0, 0);
         this->field_8 = v7;
-        auto *v8 = static_cast<char *>(malloc(v7 + 1));
+        auto *v8 = static_cast<char *>(malloc(v7 + 2));
         size_t v9 = this->field_8;
         this->field_0 = v8;
         fread(v8, 1u, v9, v5);
         this->field_0[this->field_8] = 0;
         fclose(v5);
-        sub_81D0B0(this->field_0, a3, this->field_8);
+
+        if (!is_plain_text) {
+            sub_81D0B0(this->field_0, a3, this->field_8);
+        } else {
+            // Strip UTF-8 BOM if present
+            if (this->field_8 >= 3 &&
+                static_cast<unsigned char>(this->field_0[0]) == 0xEF &&
+                static_cast<unsigned char>(this->field_0[1]) == 0xBB &&
+                static_cast<unsigned char>(this->field_0[2]) == 0xBF) {
+                memmove(this->field_0, this->field_0 + 3, this->field_8 - 3);
+                this->field_8 -= 3;
+                this->field_0[this->field_8] = 0;
+            }
+            // Auto convert UTF-8 to Windows-1254
+            convert_buffer_utf8_to_cp1254(this->field_0, this->field_8);
+        }
 
         char *v12;
         for (int i{0}; i < this->field_8; ++i) {
@@ -206,5 +288,7 @@ FileUSM *create_usm_file(const char *a1, char *a2) {
 }
 
 void FileUSM_patch() {
+    SET_JUMP(0x0081C7C0, create_usm_file);
+    SET_JUMP(0x0081C580, get_msg);
     REDIRECT(0x005AC8A9, get_msg);
 }

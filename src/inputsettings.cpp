@@ -176,7 +176,7 @@ float InputSettings::internal_struct::get_state(InputAction a2) const
         for (uint32_t i {0}; i < 6; ++i)
         {
             const auto &v1 = this->field_4[idx][i];
-            if (v1.m_input_type != InputType::None)
+            if (v1.m_input_type == InputType::Key || v1.m_input_type == InputType::Mouse)
             {
                 auto v2 = v1.field_8;
                 auto v5 = std::abs(v2);
@@ -239,6 +239,37 @@ bool sub_582630(BOOL Data)
         v1->clear(21, 3);
         return g_settings()->sub_81CF80("Settings\\MouseLook", 0);
     }
+}
+
+void setup_gamepad_default_bindings()
+{
+    if (g_inputSettingsInGame() == nullptr || g_inputSettingsMenu() == nullptr) {
+        return;
+    }
+
+    auto *ingame = &g_inputSettingsInGame()->field_18;
+    auto *menu = &g_inputSettingsMenu()->field_18;
+
+    // Slot 3 in internal_struct is Gamepad 1 (InputType::Joy)
+    ingame->set(InputAction::Jump, 3, InputType::Joy, 21);        // Button 1 (Cross / A)
+    ingame->set(InputAction::Kick, 3, InputType::Joy, 22);        // Button 2 (Circle / B)
+    ingame->set(InputAction::Punch, 3, InputType::Joy, 23);       // Button 3 (Square / X)
+    ingame->set(InputAction::ThrowWeb, 3, InputType::Joy, 24);    // Button 4 (Triangle / Y)
+    ingame->set(InputAction::StickToWalls, 3, InputType::Joy, 27); // Button 7 (L2 / LT)
+    ingame->set(InputAction::BlackButton, 3, InputType::Joy, 28);  // Button 8 (R2 / RT)
+    ingame->set(InputAction::Pause, 3, InputType::Joy, 30);       // Button 10 (Start / Options)
+    ingame->set(InputAction::BackButton, 3, InputType::Joy, 29);  // Button 9 (Select / Share)
+    ingame->set(InputAction::Forward, 3, InputType::Joy, 4);      // LY- / Up
+    ingame->set(InputAction::Backward, 3, InputType::Joy, 3);     // LY+ / Down
+    ingame->set(InputAction::TurnLeft, 3, InputType::Joy, 2);     // LX- / Left
+    ingame->set(InputAction::TurnRight, 3, InputType::Joy, 1);    // LX+ / Right
+
+    menu->set(InputAction::Jump, 3, InputType::Joy, 21);          // Confirm
+    menu->set(InputAction::Kick, 3, InputType::Joy, 24);          // Cancel
+    menu->set(InputAction::Forward, 3, InputType::Joy, 4);
+    menu->set(InputAction::Backward, 3, InputType::Joy, 3);
+    menu->set(InputAction::TurnLeft, 3, InputType::Joy, 2);
+    menu->set(InputAction::TurnRight, 3, InputType::Joy, 1);
 }
 
 void input_settings_patch()

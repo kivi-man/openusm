@@ -22,7 +22,6 @@ enum InputType {
     Joy7 = 10,
     Joy8 = 11,
     Joy9 = 12
-
 };
 
 struct InputSettings {
@@ -84,3 +83,4 @@ extern Var<InputSettings *> g_inputSettings3;
 extern Var<InputSettings *> g_inputSettings4;
 
 extern void sub_5828B0();
+extern void setup_gamepad_default_bindings();
