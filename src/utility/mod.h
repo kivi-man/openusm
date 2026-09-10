@@ -5,11 +5,16 @@
 
 #include <map>
 #include <filesystem>
+#include <vector>
+#include <algorithm>
+#include <cctype>
+#include <fstream>
 
 struct Mod {
     std::filesystem::path Path;
-    int Type;       // 1 = tex, 2 = mesh, 3 = (custom) mesh
+    int Type;       // 1 = tex, 2 = mesh, 3 = (custom) mesh, 4 = fdf
     std::vector<uint8_t> Data;
+    bool IsLoaded = false;
 };
 
 struct modGenericMesh {
@@ -45,10 +50,31 @@ extern Mod* dbgReplaceMesh;
     }
     return nullptr;
 }
+
 [[maybe_unused]] static uint8_t* getModDataByHash(uint32_t hash) {
-    if (hasMod(hash))
-        if (auto mod = getMod(hash))
-            return &mod->Data.data()[0];
+    auto it = Mods.find(hash);
+    if (it == Mods.end())
+        return nullptr;
+
+    Mod& mod = it->second;
+    if (mod.Type != 1 && mod.Type != 2 && mod.Type != 3)
+        return nullptr;
+
+    if (!mod.IsLoaded) {
+        std::ifstream file(mod.Path, std::ios::binary);
+        if (file) {
+            file.seekg(0, std::ios::end);
+            std::streamsize sz = file.tellg();
+            file.seekg(0, std::ios::beg);
+            mod.Data.resize(sz);
+            file.read(reinterpret_cast<char*>(mod.Data.data()), sz);
+            mod.IsLoaded = true;
+        }
+    }
+
+    if (!mod.Data.empty())
+        return mod.Data.data();
+
     return nullptr;
 }
 

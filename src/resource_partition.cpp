@@ -12,34 +12,22 @@
 #include <cassert>
 
 VALIDATE_SIZE(resource_partition, 0xB4u);
+VALIDATE_OFFSET(resource_partition, field_0, 0x00);
+VALIDATE_OFFSET(resource_partition, field_4, 0x04);
+VALIDATE_OFFSET(resource_partition, m_pack_slots, 0x08);
+VALIDATE_OFFSET(resource_partition, streamer, 0x18);
+VALIDATE_OFFSET(resource_partition, field_A8, 0xA8);
+VALIDATE_OFFSET(resource_partition, partition_buffer_used, 0xAC);
+VALIDATE_OFFSET(resource_partition, partition_buffer_size, 0xB0);
 
 resource_partition::resource_partition(resource_partition_enum a2)
 {
-    if constexpr (1)
-    {
-        this->field_4 = a2;
-        this->clear();
-
-        this->streamer.init(this, &this->m_pack_slots);
-    }
-    else
-    {
-        THISCALL(0x005427C0, this, a2);
-    }
+    THISCALL(0x005427C0, this, a2);
 }
 
 resource_partition::~resource_partition()
 {
-    if constexpr (1)
-    {
-        this->clear();
-        this->m_pack_slots.clear();
-    }
-    else
-    {
-        THISCALL(0x0053DFD0, this);
-    }
-
+    THISCALL(0x0053DFD0, this);
 }
 
 void * resource_partition::operator new(size_t size) {
@@ -50,59 +38,27 @@ void resource_partition::operator delete(void *ptr, size_t size) {
     mem_dealloc(ptr, size);
 }
 
-
 void resource_partition::frame_advance(Float a1, limited_timer *a2) {
     this->streamer.frame_advance({a1}, a2);
 }
 
 bool resource_partition::has_room_for_slot(int a2)
 {
-    auto v2 = a2;
-    if (a2 % 4096 > 0) {
-        v2 = (a2 / 4096 + 1) << 12;
+    if (a2 <= 0) return true;
+    uint32_t v2 = (uint32_t)a2;
+    if (v2 % 4096 > 0) {
+        v2 = ((v2 / 4096) + 1) << 12;
     }
 
-    return v2 + this->partition_buffer_used <= this->partition_buffer_size;
+    uint32_t used = (uint32_t)this->partition_buffer_used;
+    uint32_t total = (uint32_t)this->partition_buffer_size;
+
+    return (v2 + used <= total);
 }
 
 void resource_partition::clear()
 {
-    TRACE("resource_partition::clear");
-
-    assert(streamer.is_idle());
-
-    if constexpr (1)
-    {
-        for (uint32_t i = 0; i < this->m_pack_slots.size(); ++i)
-        {
-            auto *slot = this->m_pack_slots[i];
-
-            worldly_pack_slot *delete_me = CAST(delete_me, slot);
-            assert(delete_me != nullptr);
-
-            assert(delete_me->is_empty());
-
-            if (delete_me != nullptr) {
-                delete_me->m_vtbl->finalize(delete_me, nullptr, true);
-            }
-        }
-
-        if (this->m_pack_slots.m_first != nullptr) {
-            delete this->m_pack_slots.m_first;
-        }
-
-        this->m_pack_slots = {};
-
-        this->streamer.clear();
-        this->field_0 = 0;
-        this->field_A8 = nullptr;
-        this->partition_buffer_used = 0;
-        this->partition_buffer_size = 0;
-    }
-    else
-    {
-        THISCALL(0x00537B30, this);
-    }
+    THISCALL(0x00537B30, this);
 }
 
 void resource_partition::pop_pack_slot()

@@ -49,7 +49,7 @@ protected:
 };
 
 // TEMPLATE CLASS deque
-template<class _Ty, class _Ax = std::allocator<_Ty>>
+template<class _Ty, class _Ax = _std::allocator<_Ty>>
 class deque : public _Deque_val<_Ty, _Ax> { // circular queue of pointers to blocks
 public:
     enum {                // deque parameters

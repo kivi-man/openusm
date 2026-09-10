@@ -18,7 +18,10 @@ box_trigger_resource_handler::box_trigger_resource_handler(worldly_pack_slot *a2
 }
 
 int box_trigger_resource_handler::get_num_resources() {
-    return this->my_slot->box_trigger_instances->size();
+    if (this->my_slot != nullptr && this->my_slot->box_trigger_instances != nullptr) {
+        return this->my_slot->box_trigger_instances->size();
+    }
+    return 0;
 }
 
 bool box_trigger_resource_handler::_handle(worldly_resource_handler::eBehavior behavior, int , limited_timer *a5)

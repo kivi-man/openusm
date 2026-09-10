@@ -21,7 +21,7 @@
 
 namespace _std {
 
-template<class _Ty, class _Ax = std::allocator<_Ty>>
+template<class _Ty, class _Ax = _std::allocator<_Ty>>
 struct vector;
 
 // base class for vector to hold allocator _Alval
@@ -1327,5 +1327,5 @@ struct vector<_Bool, _Alloc> : public _Container_base {
     _Vbtype _Myvec;    // base vector of words
 };
 
-typedef vector<bool, std::allocator<bool>> _Bvector;
+typedef vector<bool, _std::allocator<bool>> _Bvector;
 } // namespace _std

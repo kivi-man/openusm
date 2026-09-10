@@ -3141,25 +3141,25 @@ nglTexture *nglLoadTexture(const tlFixedString &a1)
 
         nglTexture *tex = Find(nglTextureDirectory(), 0, &a1);
         if (tex == nullptr) {
-            printf("[TEX_DBG] nglLoadTexture: '%s' (hash: 0x%08X) NOT found in directory, calling Load (StandardLoad)\n", a1.to_string(), a1.GetHash());
-            auto *loaded = vtbl->Load(nglTextureDirectory(), 0, &a1);
-            printf("[TEX_DBG] nglLoadTexture: StandardLoad returned tex=%p for '%s'\n", loaded, a1.to_string());
-            if (loaded != nullptr) {
-                printf("[TEX_DBG] nglLoadTexture: loaded tex dimensions: %dx%d, DXTexture=%p\n",
-                       loaded->m_width, loaded->m_height, loaded->DXTexture);
-            }
-            return loaded;
+            tex = vtbl->Load(nglTextureDirectory(), 0, &a1);
+        } else {
+            ++tex->field_8;
         }
 
-        printf("[TEX_DBG] nglLoadTexture: '%s' (hash: 0x%08X) FOUND in directory, tex=%p (%dx%d)\n",
-               a1.to_string(), a1.GetHash(), tex, tex->m_width, tex->m_height);
-
-        if (auto data = getModDataByHash(a1.GetHash())) {
-            printf("[TEX_DBG] nglLoadTexture: applying mod override for '%s'\n", a1.to_string());
+        if (tex == nullptr || tex == nglDefaultTex()) {
+            if (auto data = getModDataByHash(a1.GetHash())) {
+                auto *new_tex = static_cast<nglTexture *>(tlMemAlloc(sizeof(nglTexture), 8, 0x1000000u));
+                memset(new_tex, 0, sizeof(nglTexture));
+                new_tex->field_8 = 1;
+                new_tex->field_60 = a1;
+                nglLoadTextureTM2(new_tex, data);
+                bit_cast<tlInstanceBankResourceDirectory<nglTexture, tlFixedString> *>(nglTextureDirectory())->Add(new_tex);
+                tex = new_tex;
+            }
+        } else if (auto data = getModDataByHash(a1.GetHash())) {
             nglLoadTextureTM2(tex, data);
         }
 
-        ++tex->field_8;
         return tex;
     } else {
         return (nglTexture *) CDECL_CALL(0x00773290, &a1);
@@ -3182,14 +3182,17 @@ nglTexture *nglLoadTexture(const tlHashString &a1)
     auto *vtbl = bit_cast<Vtbl *>(nglTextureDirectory()->m_vtbl);
     auto *tex = vtbl->Find(nglTextureDirectory(), nullptr, v1);
     if (tex == nullptr) {
-        return vtbl->Load(nglTextureDirectory(), nullptr, &a1);
+        tex = vtbl->Load(nglTextureDirectory(), nullptr, &a1);
+    } else {
+        ++tex->field_8;
     }
 
-    if (auto data = getModDataByHash(v1)) {
-        nglLoadTextureTM2(tex, data);
+    if (tex != nullptr && tex != nglDefaultTex()) {
+        if (auto data = getModDataByHash(v1)) {
+            nglLoadTextureTM2(tex, data);
+        }
     }
 
-    ++tex->field_8;
     return tex;
 }
 
@@ -3222,16 +3225,8 @@ nglFont *create_and_parse_fdf(const tlFixedString &a1, char *a2)
     printf("[FONT_DBG] nglLoadTexture returned tex=%p for '%s'\n", font->field_24, a1.to_string());
 
     if (font->field_24 != nullptr) {
-        printf("[FONT_DBG] tex dimensions: %dx%d, DXTexture=%p\n",
-               font->field_24->m_width, font->field_24->m_height, font->field_24->DXTexture);
-        if (auto data = getModDataByHash(a1.GetHash())) {
-            printf("[FONT_DBG] Forcing mod texture override on font '%s' (tex: %p, data: %p)\n", a1.to_string(), font->field_24, data);
-            nglLoadTextureTM2(font->field_24, data);
-            printf("[FONT_DBG] After override: tex dimensions: %dx%d, DXTexture=%p\n",
-                   font->field_24->m_width, font->field_24->m_height, font->field_24->DXTexture);
-        } else {
-            printf("[FONT_DBG] getModDataByHash returned NULL for '%s' (hash: 0x%08X) - NO OVERRIDE\n", a1.to_string(), a1.GetHash());
-        }
+        printf("[FONT_DBG] font '%s' tex dimensions: %dx%d, DXTexture=%p\n",
+               a1.to_string(), font->field_24->m_width, font->field_24->m_height, font->field_24->DXTexture);
     } else {
         printf("[FONT_DBG] WARNING: nglLoadTexture returned NULL for '%s'!\n", a1.to_string());
     }
@@ -3712,10 +3707,16 @@ bool nglLoadTextureTM2(nglTexture *tex, uint8_t *a2)
                 tex->DXTexture = nullptr;
             }
 
-            uint32_t pitch_or_size = *(uint32_t *)&a2[20];
-            uint32_t total_sz = pitch_or_size * tex->m_height + 128;
-            if (total_sz < 128) {
-                total_sz = tex->m_width * tex->m_height * 4 + 128;
+            uint32_t total_sz = 0;
+            if (auto mod = getMod(tex->field_60.m_hash)) {
+                total_sz = mod->Data.size();
+            }
+            if (total_sz == 0) {
+                uint32_t pitch_or_size = *(uint32_t *)&a2[20];
+                total_sz = pitch_or_size * tex->m_height + 128;
+                if (total_sz < 128) {
+                    total_sz = tex->m_width * tex->m_height * 4 + 128;
+                }
             }
 
             auto hr = (HRESULT)STDCALL(0x007CA291, g_Direct3DDevice(), a2, total_sz, &tex->DXTexture);
@@ -3724,6 +3725,12 @@ bool nglLoadTextureTM2(nglTexture *tex, uint8_t *a2)
                 tex->field_38 = -1;
                 printf("[TEX_DBG] nglLoadTextureTM2: Direct3D texture created for '%s' (%dx%d, ptr: %p)\n",
                        tex->field_60.to_string(), tex->m_width, tex->m_height, tex->DXTexture);
+                // Release temporary CPU file buffer now that Direct3D has the texture in GPU VRAM
+                if (auto mod = getMod(tex->field_60.m_hash)) {
+                    mod->Data.clear();
+                    mod->Data.shrink_to_fit();
+                    mod->IsLoaded = false;
+                }
                 return true;
             }
         }
@@ -4173,17 +4180,17 @@ static void utf8_to_cp1254_str(const char *src, unsigned char *dst, size_t dst_m
             s += 2;
         } else if (*s == 0xC4 && *(s + 1)) {
             unsigned char c2 = *(s + 1);
-            if (c2 == 0x9E) dst[d++] = 0xD0; // �
-            else if (c2 == 0x9F) dst[d++] = 0xF0; // ğ
-            else if (c2 == 0xB0) dst[d++] = 0xDD; // İ
-            else if (c2 == 0xB1) dst[d++] = 0xFD; // ı
+            if (c2 == 0x9E) dst[d++] = 0xD0; // Ä
+            else if (c2 == 0x9F) dst[d++] = 0xF0; // ÄŸ
+            else if (c2 == 0xB0) dst[d++] = 0xDD; // Ä°
+            else if (c2 == 0xB1) dst[d++] = 0xFD; // Ä±
             else dst[d++] = c2;
             s += 2;
         } else if (*s == 0xC5 && *(s + 1)) {
             unsigned char c2 = *(s + 1);
-            if (c2 == 0x90) dst[d++] = 0xDD; // İ (U+0130)
-            else if (c2 == 0x9E) dst[d++] = 0xDE; // �
-            else if (c2 == 0x9F) dst[d++] = 0xFE; // ş
+            if (c2 == 0x90) dst[d++] = 0xDD; // Ä° (U+0130)
+            else if (c2 == 0x9E) dst[d++] = 0xDE; // Å
+            else if (c2 == 0x9F) dst[d++] = 0xFE; // ÅŸ
             else dst[d++] = c2;
             s += 2;
         } else {

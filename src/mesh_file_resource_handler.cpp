@@ -38,7 +38,7 @@ bool mesh_file_resource_handler::_handle_resource(worldly_resource_handler::eBeh
     TRACE("mesh_file_resource_handler::handle_resource", loc->name.to_string());
     sp_log("0x%08X", loc->field_8);
 
-    if constexpr (1)
+    if constexpr (0)
     {
         assert(my_slot->get_resource_directory().get_tlresource_count(TLRESOURCE_TYPE_MESH_FILE) ==
                my_slot->get_resource_directory().get_resource_count(
@@ -176,22 +176,4 @@ bool mesh_file_resource_handler::handle(worldly_resource_handler::eBehavior a2, 
 
 void mesh_file_resource_handler_patch()
 {
-    FUNC_ADDRESS(address, &mesh_file_resource_handler::_handle_resource);
-    set_vfunc(0x00888A44, address);
-
-    if constexpr (0)
-    {
-        {
-            REDIRECT(0x0056BD63, parse_generic_mash_init);
-
-            REDIRECT(0x0056BDAA, nglLoadMeshFileInternal);
-
-            REDIRECT(0x0056BE3D, nglReleaseSection);
-        }
-
-        {
-            FUNC_ADDRESS(address, &mesh_file_resource_handler::handle);
-            //set_vfunc(0x00888A3C, address);
-        }
-    }
 }

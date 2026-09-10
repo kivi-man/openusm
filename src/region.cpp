@@ -402,23 +402,32 @@ void region::un_mash_lego_map(char *a2, int *a3)
 {
     TRACE("region::un_mash_lego_map");
 
-    if constexpr (1) {
-        this->field_9C = (lego_map_root_node *)a2;
-        this->field_9C->un_mash(a2, a3, this);
-        auto *mem = lego_bitvector_pool.allocate_new_block();
-        this->bitvector_of_legos_rendered_last_frame = new (mem) fixed_bitvector<uint, 2048>{};
+    this->field_9C = (lego_map_root_node *)a2;
+    this->field_9C->un_mash(a2, a3, this);
 
-        assert(bitvector_of_legos_rendered_last_frame != nullptr);
-        auto sub_663403 = [](auto *self) -> void
-        {
-            for ( auto i = 0u; i < 65u; ++i ) {
-                self->field_4[i] = -1;
-            }
-        };
-
-        sub_663403(this->bitvector_of_legos_rendered_last_frame);
+    void *mem = nullptr;
+    auto *free_list = *(void **)0x009222D8;
+    if (free_list != nullptr) {
+        mem = free_list;
+        *(void **)0x009222D8 = *(void **)free_list;
     } else {
-        THISCALL(0x0054FEC0, this, a2, a3);
+        int max_blocks = *(int *)0x009222E8;
+        int cur_blocks = *(int *)0x009222EC;
+        if (cur_blocks < max_blocks) {
+            mem = lego_bitvector_pool.allocate_new_block();
+        } else {
+            // Pool full (districts > 8): dynamic allocation fallback!
+            mem = malloc(sizeof(fixed_bitvector<uint, 2048>));
+        }
+    }
+
+    if (mem == nullptr) {
+        mem = malloc(sizeof(fixed_bitvector<uint, 2048>));
+    }
+
+    this->bitvector_of_legos_rendered_last_frame = new (mem) fixed_bitvector<uint, 2048>{};
+    for (auto i = 0u; i < 65u; ++i) {
+        this->bitvector_of_legos_rendered_last_frame->field_4[i] = -1;
     }
 }
 
@@ -469,10 +478,27 @@ region *region::get_neighbor(int neighbor_index) const
 
 void region_patch()
 {
+    // Prevent crash at 0x005454B7 when this->region_entities is null
     {
-        void (region::*func)(entity *e) = &region::add;
+        DWORD oldProtect;
+        VirtualProtect((void *)0x005454B7, 9, PAGE_EXECUTE_READWRITE, &oldProtect);
+        const uint8_t patch_bytes[] = { 0x85, 0xD2, 0x74, 0x26, 0x39, 0x5A, 0x0C, 0x74, 0x21 };
+        memcpy((void *)0x005454B7, patch_bytes, sizeof(patch_bytes));
+        VirtualProtect((void *)0x005454B7, 9, oldProtect, &oldProtect);
+    }
+
+    // Expand region_entities free pool from 9 to 128 slots at 0x0055544C
+    {
+        DWORD oldProtect;
+        VirtualProtect((void *)0x0055544C, 4, PAGE_EXECUTE_READWRITE, &oldProtect);
+        *(uint32_t *)0x0055544C = 128;
+        VirtualProtect((void *)0x0055544C, 4, oldProtect, &oldProtect);
+    }
+
+    {
+        void (region::*func)(char *, int *) = &region::un_mash_lego_map;
         FUNC_ADDRESS(address, func);
-        REDIRECT(0x004F537A, address);
-        REDIRECT(0x0055ACD5, address);
+        REDIRECT(0x0055AE64, address);
+        SET_JUMP(0x0054FEC0, address);
     }
 }

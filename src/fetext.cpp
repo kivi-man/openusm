@@ -1,4 +1,7 @@
 #include "fetext.h"
+#include "ps4_controller.h"
+#include "multilinestring.h"
+#include "femanager.h"
 
 #include "common.h"
 #include "fetextflashinfo.h"
@@ -12,6 +15,8 @@
 #include "utility.h"
 #include "variables.h"
 #include "vtbl.h"
+
+#include <string>
 
 VALIDATE_SIZE(FEText, 0x68);
 
@@ -58,48 +63,96 @@ int FEText::_get_mash_sizeof()
 }
 
 void FEText::Draw() {
-    //sp_log("Draw:");
+    if (this->IsShown() && !(this->field_1C == mString{""})) {
+        auto color = this->field_4C;
+        if ((this->field_64 & 8) != 0 && this->flash_info != nullptr) {
+            color = this->flash_info->GetColor(this->field_4C);
+        }
 
-    if constexpr (0)
-    {
-        if (this->IsShown() && !(this->field_1C == mString{""})) {
-            auto color = this->field_4C;
-            if ((this->field_64 & 8) != 0) {
-                color = this->flash_info->GetColor(this->field_4C);
-            }
+        auto alpha = color.get_alpha();
+        uint8_t v2 = (uint64_t) ((double) alpha * this->field_4);
 
-            auto alpha = color.get_alpha();
-            uint8_t v2 = (uint64_t) ((double) alpha * this->field_4);
+        color.set_alpha(v2);
+        if ((this->field_64 & 1) == 0) {
+            color.set_alpha(255u);
+            color.set_blue(255u);
+            color.set_green(255u);
+            color.set_red(255u);
+        }
 
-            color.set_alpha(v2);
-            if ((this->field_64 & 1) == 0) {
-                color.set_alpha(255u);
-                color.set_blue(255u);
-                color.set_green(255u);
-                color.set_red(255u);
-            }
+        auto a4 = this->field_34[1];
+        auto a3 = this->field_34[0];
 
-            auto a4 = this->field_34[1];
-            auto a3 = this->field_34[0];
-
-            {
-                void (__fastcall *field_108)(FEText *, void *, void *, void *) = CAST(field_108, get_vfunc(this->m_vtbl, 0x108));
+        {
+            void (__fastcall *field_108)(FEText *, void *, void *, void *) = CAST(field_108, get_vfunc(this->m_vtbl, 0x108));
+            if (field_108 != nullptr) {
                 field_108(this, nullptr, &a3, &a4);
             }
-
-            nglFont *font = g_femanager.GetFont(this->field_18);
-
-            auto v10 = this->field_40;
-            auto v9 = this->field_3C;
-
-            auto a5 = this->GetZvalue();
-
-            auto v14 = color32::to_int(color);
-            auto *str = this->field_1C.c_str();
-            nglListAddString(font, str, a3, a4, a5, v14, v9, v10);
         }
-    } else {
-        THISCALL(0x00617640, this);
+
+        nglFont *font = g_femanager.GetFont(this->field_18);
+
+        auto v10 = this->field_40;
+        auto v9 = this->field_3C;
+
+        auto a5 = this->GetZvalue();
+
+        auto v14 = color32::to_int(color);
+        const char *raw_str = this->field_1C.c_str();
+
+        std::string s(raw_str ? raw_str : "");
+        if (ps4_controller::instance().is_ps4_active() && !s.empty()) {
+            auto replace_all = [&](const std::string &from, const std::string &to) {
+                size_t pos = 0;
+                while ((pos = s.find(from, pos)) != std::string::npos) {
+                    s.replace(pos, from.length(), to);
+                    pos += to.length();
+                }
+            };
+
+            replace_all("[SPACE]", "~cross");
+            replace_all("[Space]", "~cross");
+            replace_all("[ENTER]", "~cross");
+            replace_all("[Enter]", "~cross");
+            replace_all("[ESC]", "~start");
+            replace_all("[Esc]", "~start");
+            replace_all("[TAB]", "~select");
+            replace_all("[Tab]", "~select");
+            replace_all("[LMB]", "~square");
+            replace_all("[RMB]", "~triangle");
+            replace_all("[Left Mouse Button]", "~square");
+            replace_all("[Right Mouse Button]", "~triangle");
+            replace_all("[E]", "~circle");
+            replace_all("[e]", "~circle");
+            replace_all("[Q]", "~l2");
+            replace_all("[q]", "~l2");
+            replace_all("[Left Shift]", "~r2");
+            replace_all("[LEFT SHIFT]", "~r2");
+            replace_all("[SHIFT]", "~r2");
+            replace_all("[Shift]", "~r2");
+            replace_all("[W,A,S,D]", "~stick_left");
+            replace_all("[WASD]", "~stick_left");
+            replace_all("ENTER:", "~cross");
+            replace_all("ESC:", "~triangle");
+            replace_all("SPACE:", "~cross");
+            replace_all("\"SPACE\"", "~cross");
+            replace_all("\"ENTER\"", "~cross");
+            replace_all("\"ESC\"", "~start");
+            replace_all("\"TAB\"", "~select");
+        }
+
+        if (s.find('~') != std::string::npos) {
+            MultiLineString mls;
+            MultiLineString::string mls_str;
+            mString temp_ms{s.c_str()};
+            std::memcpy(&mls_str, &temp_ms, sizeof(temp_ms));
+            mls.field_4[0] = a3;
+            mls.field_4[1] = a4;
+            mls.Set(mls_str, this->field_18, v9, v10);
+            mls.Draw(a5, v14, v14, v9, v10, v9, v10);
+        } else {
+            nglListAddString(font, s.c_str(), a3, a4, a5, v14, v9, v10);
+        }
     }
 }
 
@@ -237,43 +290,6 @@ float FEText::GetY() {
 }
 
 void FEText_patch() {
-    {
-        FUNC_ADDRESS(address, &FEText::_unmash);
-        SET_JUMP(0x0062E540, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &FEText::_get_mash_sizeof);
-        set_vfunc(0x0087A02C, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &FEText::SetTextNoLocalize);
-        set_vfunc(0x0087A06C, address);
-        set_vfunc(0x0087A17C, address);
-    }
-
-
-    return;
-
-    if constexpr (0) {
-        {
-            FUNC_ADDRESS(address, &FEText::Update);
-            SET_JUMP(0x006098D0, address);
-        }
-
-        {
-            FUNC_ADDRESS(address, &FEText::Draw);
-            set_vfunc(0x0087A034, address);
-
-            void (*p_func)(nglFont *, const char *,
-                    Float, Float, Float, uint32_t, Float, Float) = &nglListAddString;
-            REDIRECT(0x00617745, p_func);
-        }
-
-        {
-            FUNC_ADDRESS(address, &FEText::AdjustForJustification);
-            set_vfunc(0x0087A0E8, address);
-        }
-    }
+    FUNC_ADDRESS(draw_addr, &FEText::Draw);
+    SET_JUMP(0x00617640, draw_addr);
 }

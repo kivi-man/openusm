@@ -27,4 +27,14 @@ inline void __log(const char *file, int line, const char *format, ...) {
     vprintf(format, args);
     printf("\n");
     va_end(args);
+
+    static FILE *flog = fopen("openusm.log", "a");
+    if (flog) {
+        va_start(args, format);
+        fprintf(flog, "[%s:%d] ", file, line);
+        vfprintf(flog, format, args);
+        fprintf(flog, "\n");
+        fflush(flog);
+        va_end(args);
+    }
 }

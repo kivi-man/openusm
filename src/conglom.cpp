@@ -1543,10 +1543,8 @@ void conglomerate_patch()
         set_vfunc(0x00884834, address);
     }
 
-    {
-        FUNC_ADDRESS(address, &conglomerate::_render);
-        set_vfunc(0x0088487C, address);
-    }
+    // FUNC_ADDRESS(address, &conglomerate::_render);
+    // set_vfunc(0x0088487C, address);
 
     {
         FUNC_ADDRESS(address, &mashable_vector<entity_base *>::custom_un_mash);

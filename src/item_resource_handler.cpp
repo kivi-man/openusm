@@ -19,7 +19,10 @@ item_resource_handler::item_resource_handler(worldly_pack_slot *a2)
 }
 
 int item_resource_handler::get_num_resources() {
-    return this->my_slot->item_instances->size();
+    if (this->my_slot != nullptr && this->my_slot->item_instances != nullptr) {
+        return this->my_slot->item_instances->size();
+    }
+    return 0;
 }
 
 bool item_resource_handler::_handle(worldly_resource_handler::eBehavior behavior, int , limited_timer *a5)

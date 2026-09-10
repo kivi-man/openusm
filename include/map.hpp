@@ -68,7 +68,7 @@ public:
 template<class _Kty,
          class _Ty,
          class _Pr = std::less<_Kty>,
-         class _Alloc = std::allocator<pair<const _Kty, _Ty>>>
+         class _Alloc = _std::allocator<pair<const _Kty, _Ty>>>
 class map
     : public _Tree<
           _Tmap_traits<_Kty, _Ty, _Pr, _Alloc, false>> { // ordered red-black tree of {key, mapped} values, unique keys
@@ -153,7 +153,7 @@ template<class _Kty,
     template<class _Kty,
              class _Ty,
              class _Pr = std::less<_Kty>,
-             class _Alloc = std::allocator<pair<const _Kty, _Ty>>>
+             class _Alloc = _std::allocator<pair<const _Kty, _Ty>>>
     class multimap
         : public _Tree<
               _Tmap_traits<_Kty, _Ty, _Pr, _Alloc, true>> { // ordered red-black tree of {key, mapped} values, non-unique keys

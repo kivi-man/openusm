@@ -1,6 +1,6 @@
 #pragma once
 
-#include <memory>
+#include "xmemory.hpp"
 #include <utility.hpp>
 
 #include <xutility.hpp>
@@ -59,7 +59,7 @@ struct _List_val : public _List_ptr<_Ty, _Alloc> { // base class for list to hol
     _Alty _Alval; // allocator object for values stored in nodes
 };
 
-template<typename _Ty, typename _Ax = std::allocator<_Ty>>
+template<typename _Ty, typename _Ax = _std::allocator<_Ty>>
 struct list : public _List_val<_Ty, _Ax> {
     typedef list<_Ty, _Ax> _Myt;
     typedef _List_val<_Ty, _Ax> _Mybase;

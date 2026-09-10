@@ -28,3 +28,12 @@ extern void mem_freealign(void *Memory);
 extern void *mem_alloc(size_t Size);
 
 extern void mem_dealloc(void *a1, size_t Size);
+
+#ifndef _MSVCR71_ALLOC_DECLARED
+#define _MSVCR71_ALLOC_DECLARED
+extern void *msvcr71_malloc(size_t size);
+
+extern void msvcr71_free(void *p);
+
+extern size_t msvcr71_msize(void *p);
+#endif

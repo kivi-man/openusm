@@ -153,12 +153,15 @@ void slab_allocator::initialize()
             v4 = nullptr;
         }
 
+        constexpr uint32_t EXPANDED_SLAB_COUNT = 16384u; // 64 MB (16384 slabs * 4096 bytes)
+        constexpr uint32_t EXPANDED_ARENA_SIZE = 4096u * EXPANDED_SLAB_COUNT;
+
         slab_free_list = v4;
-        static_slab_arena = static_cast<char *>(arch_memalign(4096u, 4096 * 1024u));
-        static_slab_headers = static_cast<slab_t *>(arch_malloc(sizeof(slab_t) * 1024u));
+        static_slab_arena = static_cast<char *>(arch_memalign(4096u, EXPANDED_ARENA_SIZE));
+        static_slab_headers = static_cast<slab_t *>(arch_malloc(sizeof(slab_t) * EXPANDED_SLAB_COUNT));
         auto *arena = static_slab_arena;
         auto *headers = static_slab_headers;
-        for (auto i = 0u; i < 1024u; ++i)
+        for (auto i = 0u; i < EXPANDED_SLAB_COUNT; ++i)
         {
             new (headers) slab_t {arena};
             headers->set(20);
@@ -443,7 +446,7 @@ slab_allocator::slab_t *slab_allocator::find_slab_for_object(void *obj)
                static_slab_arena);
 #endif
 
-        if ((obj < static_slab_arena) || (obj >= static_slab_arena + 0x100000))
+        if ((obj < static_slab_arena) || (obj >= static_slab_arena + 0x04000000))
         {
             uint32_t uVar3 = bit_cast<uint32_t>(obj) & 0xfffff000;
             auto *slab = (slab_t *) (uVar3 + SLAB_SIZE);
@@ -481,7 +484,7 @@ slab_allocator::slab_t *slab_allocator::find_slab_for_object(void *obj)
         {
             auto index = (uint32_t) ((char *) obj - (char *) static_slab_arena) >> 12;
 
-            constexpr auto NUM_STATIC_SLABS = 256;
+            constexpr auto NUM_STATIC_SLABS = 16384;
             assert(index < NUM_STATIC_SLABS);
 
             auto *slab = &static_slab_headers[index];
@@ -915,6 +918,11 @@ void slab_allocator::process_lists()
 
 void slab_allocator_patch()
 {
+    DWORD old;
+    VirtualProtect((void *)0x00592D6E, sizeof(uint32_t), PAGE_EXECUTE_READWRITE, &old);
+    *(uint32_t *)0x00592D6E = 0x04000000u; // 64 MB
+    VirtualProtect((void *)0x00592D6E, sizeof(uint32_t), old, &old);
+
     SET_JUMP(0x0059F750, slab_allocator::allocate);
 
     SET_JUMP(0x0059DCA0, slab_allocator::deallocate);

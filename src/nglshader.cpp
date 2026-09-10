@@ -36,12 +36,16 @@ void nglShader::Register()
 }
 
 tlFixedString nglShader::GetName() {
-    void (__fastcall *func)(void *, void *, tlFixedString *) = CAST(func, get_vfunc(m_vtbl, 0x4));
+    if (m_vtbl == 0) {
+        return tlFixedString{""};
+    }
 
-    tlFixedString result;
-    func(this, nullptr, &result);
+    const char *name_ptr = reinterpret_cast<const char *>(m_vtbl + 0x18);
+    if (name_ptr[0] >= 'A' && name_ptr[0] <= 'z') {
+        return tlFixedString{name_ptr};
+    }
 
-    return result;
+    return tlFixedString{""};
 }
 
 void nglShader::AddNode(nglMeshNode *a1, nglMeshSection *a2, nglMaterialBase *a3)
@@ -87,25 +91,35 @@ bool nglShader::CheckMaterialVersion(nglMaterialBase *mat) {
 }
 
 bool nglShader::CheckVertexDefVersion(nglMeshSection *Section) {
-    if constexpr (1) {
-        bool (__fastcall *func)(void *, void *, nglMeshSection *) = CAST(func, get_vfunc(m_vtbl, 0x1C));
+    if (m_vtbl == 0) return true;
 
+    auto func_ptr = reinterpret_cast<uintptr_t>(get_vfunc(m_vtbl, 0x1C));
+    if (func_ptr >= 0x00401000 && func_ptr <= 0x00850000) {
+        bool (__fastcall *func)(void *, void *, nglMeshSection *) = CAST(func, func_ptr);
         return func(this, nullptr, Section);
-    } else {
-        return true;
     }
+    return true;
 }
 
 void nglShader::BindSection(nglMeshSection *Section) {
-    void (__fastcall *func)(void *, void *, nglMeshSection *) = CAST(func, get_vfunc(m_vtbl, 0x20));
+    if (m_vtbl == 0) return;
 
-    func(this, nullptr, Section);
+    auto func_ptr = reinterpret_cast<uintptr_t>(get_vfunc(m_vtbl, 0x20));
+    if (func_ptr >= 0x00401000 && func_ptr <= 0x00850000) {
+        void (__fastcall *func)(void *, void *, nglMeshSection *) = CAST(func, func_ptr);
+        func(this, nullptr, Section);
+    }
 }
 
 bool nglShader::IsSwitchable() {
-    bool (__fastcall *func)(void *) = CAST(func, get_vfunc(m_vtbl, 0x24));
+    if (m_vtbl == 0) return false;
 
-    return func(this);
+    auto func_ptr = reinterpret_cast<uintptr_t>(get_vfunc(m_vtbl, 0x24));
+    if (func_ptr >= 0x00401000 && func_ptr <= 0x00850000) {
+        bool (__fastcall *func)(void *) = CAST(func, func_ptr);
+        return func(this);
+    }
+    return false;
 }
 
 void nglShaderNode::Render()

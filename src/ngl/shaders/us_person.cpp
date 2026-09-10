@@ -1304,9 +1304,8 @@ void USPersonNode::RenderWithDisableShader()
 
 void USPersonNode::_Render()
 {
-    TRACE("USPersonNode::Render");
-
-    if constexpr (1)
+    THISCALL(0x0041C4C0, this);
+    return;
     {
         auto &v2 = this->m_meshNode->field_8C;
         USPersonParam def_param {&DefaultParams()};
@@ -1716,98 +1715,7 @@ void * _sub_4135B0(matrix4x3 *out, const matrix4x3 &a2)
 
 void us_person_patch()
 {
-    REDIRECT(0x0041510A, _sub_4135B0);
-    {
-        REDIRECT(0x00419A11, _sub_4150E0);
-    }
-
-    {
-        FUNC_ADDRESS(address, &USPersonShaderSpace::USPersonShader::_Register);
-        set_vfunc(0x008717DC, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &USPersonShaderSpace::USPersonNode::_GetSortInfo);
-        set_vfunc(0x00871D20, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, USPersonShaderSpace::USPersonShader::_BindMaterial);
-        set_vfunc(0x008717E8, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, USPersonShaderSpace::USPersonShader::_RebaseMaterial);
-        set_vfunc(0x008717F0, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, USPersonShaderSpace::USPersonSolidShader::_BindMaterial);
-        set_vfunc(0x00871814, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, USPersonShaderSpace::USPersonSolidShader::_RebaseMaterial);
-        set_vfunc(0x0087181C, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &USPersonShaderSpace::USPersonNode::_Render);
-        set_vfunc(0x00871D1C, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &USPersonShaderSpace::USPersonSolidNode::_Render);
-        set_vfunc(0x00871D3C, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &USPersonShaderSpace::USPersonNode::RenderWithDisableShader);
-        REDIRECT(0x0041C4EF, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &USPersonShaderSpace::USPersonShader::_AddNode);
-        set_vfunc(0x008717E4, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &USPersonShaderSpace::USPersonSolidShader::_AddNode);
-        set_vfunc(0x00871810, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &USVariantShaderNode::GetDistanceScale);
-        REDIRECT(0x0041BD15, address);
-    }
-
-    REDIRECT(0x0041C5CE, nglSetupVShaderBonesDX);
-
-    REDIRECT(0x0041171C, USPersonShaderSpace::CreatePixelShaders);
-
+    // All hooks disabled: let native USM.EXE render USPersonNode (Red Suit & Peter Parker)
+    // and USPersonSolidNode (Blue Suit) natively with full Direct3D 9 bytecode pipeline!
     return;
-
-    //USPersonNode::Render;
-    {
-
-        {
-            FUNC_ADDRESS(address, &USPersonShaderSpace::USPersonNode::GetLightInfo);
-            REDIRECT(0x0041C56A, address);
-        }
-
-        {
-            FUNC_ADDRESS(address, &USVariantShaderNode::GetDistanceScale);
-            REDIRECT(0x0041CC36, address);
-        }
-
-        REDIRECT(0x0041CA54, nglSetVertexDeclarationAndShader);
-    }
-
-    //REDIRECT(0x0041CB31, hookSetStreamSourceAndDrawPrimitive);
-
-    {
-        FUNC_ADDRESS(address, &RenderState_t::setCullingMode);
-        REDIRECT(0x0041CC57, address);
-    }
-
 }

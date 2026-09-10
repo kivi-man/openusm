@@ -1,4 +1,4 @@
-﻿# Build output
+# Build output
 build/
 *.dll
 *.lib
@@ -63,3 +63,8 @@ desktop.ini
 # Third party build artifacts
 include/assimp/
 third_party/glm/
+
+# Scratch & Local temporary tools
+scratch/
+fontlar/
+reconstructed_lrc.*

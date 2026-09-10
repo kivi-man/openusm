@@ -72,7 +72,7 @@ VALIDATE_SIZE(list_t::_Mybase, 3u);
 VALIDATE_SIZE(list_t::_Myt, 12u);
 #endif
 
-using List_ptr_t = _std::_List_ptr<list_t::value_type, std::allocator<list_t::value_type>>;
+using List_ptr_t = _std::_List_ptr<list_t::value_type, _std::allocator<list_t::value_type>>;
 
 VALIDATE_SIZE(List_ptr_t, 2u);
 

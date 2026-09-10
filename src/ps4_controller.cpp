@@ -301,7 +301,12 @@ void ps4_controller::send_hid_output_report() {
     }
 
     if (m_hid_handle == INVALID_HANDLE_VALUE) {
-        find_and_open_ds4_hid();
+        static DWORD s_last_scan_tick = 0;
+        DWORD now_scan = GetTickCount();
+        if (now_scan - s_last_scan_tick >= 2000) {
+            s_last_scan_tick = now_scan;
+            find_and_open_ds4_hid();
+        }
         if (m_hid_handle == INVALID_HANDLE_VALUE) return;
     }
 

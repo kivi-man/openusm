@@ -39,8 +39,19 @@ camera_target_info::camera_target_info(entity *_target,
 {
     TRACE("camera_target_info::camera_target_info");
 
-    assert(_target != nullptr);
-    assert(_target->is_a_conglomerate());
+    if (_target == nullptr) {
+        this->field_54 = nullptr;
+        this->pos = _pos;
+        this->up = _up;
+        this->facing = ZVEC;
+        this->field_C = ZEROVEC;
+        this->field_24 = ZEROVEC;
+        this->radius = 0.75f;
+        this->min_look_dist = 2.0f;
+        this->max_look_dist = 10.0f;
+        this->field_58 = 0;
+        return;
+    }
 
     if constexpr (0)
     {
@@ -184,8 +195,12 @@ int camera_target_info::get_loco_mode() const
 {
     TRACE("camera_target_info::get_loco_mode");
 
+    if (this->field_54 == nullptr) {
+        return 1;
+    }
+
     auto *v1 = this->field_54->m_player_controller;
-    if (v1 != nullptr)
+    if (v1 == nullptr)
     {
         return 1;
     }

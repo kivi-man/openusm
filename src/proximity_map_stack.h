@@ -25,8 +25,9 @@ struct dynamic_proximity_map_stack {
     void release(void *);
 };
 
-//0x0053B860
 extern void init_proximity_map_stacks();
+
+extern void proximity_map_stack_patch();
 
 extern Var<dynamic_proximity_map_stack *[number_of_district_proximity_map_stacks]>
     district_proximity_map_stacks;

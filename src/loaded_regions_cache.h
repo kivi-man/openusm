@@ -21,6 +21,14 @@ namespace loaded_regions_cache {
         uint16_t field_1A;
     };
 
+    extern void custom_get_regions_intersecting_sphere(const vector4d *sphere,
+                                                       fixed_vector<::region *, 15> *output_array);
+
+    extern void custom_get_regions_intersecting_box(const vector3d *p1,
+                                                    const vector3d *p2,
+                                                    fixed_vector<::region *, 15> *output_array,
+                                                    const vector3d *padding);
+
     extern void get_regions_intersecting_sphere_platform_independent(const vector4d &,
                                                                 fixed_vector<::region *, 15> *);
 
@@ -30,3 +38,5 @@ namespace loaded_regions_cache {
 
     inline Var<region[9]> regions {0x009222F8};
 }
+
+extern void loaded_regions_cache_patch();

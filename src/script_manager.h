@@ -2,6 +2,7 @@
 
 #include "float.hpp"
 
+#include <cstdint>
 #include <list.hpp>
 #include <map.hpp>
 

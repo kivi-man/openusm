@@ -12,11 +12,6 @@ void nalSceneAnimInstance::Render() const
 {
     TRACE("nalSceneAnimInstance::Render");
 
-    if (this->field_8 != nullptr)
-    {
-        sp_log("0x%08X", this->field_8->field_0->m_vtbl);
-    }
-
     if constexpr (0)
     {
         auto v2 = this->field_14 / this->field_18->field_8->field_38;

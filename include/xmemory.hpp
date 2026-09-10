@@ -3,6 +3,7 @@
 #ifndef _XMEMORY_
 #define _XMEMORY_
 #ifndef RC_INVOKED
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <new>
@@ -32,6 +33,13 @@
 #define _POINTER_X(T, A) typename A::template rebind<T>::other::pointer
 #define _REFERENCE_X(T, A) typename A::template rebind<T>::other::reference
 
+#ifndef _MSVCR71_ALLOC_DECLARED
+#define _MSVCR71_ALLOC_DECLARED
+extern void *msvcr71_malloc(size_t size);
+extern void msvcr71_free(void *p);
+extern size_t msvcr71_msize(void *p);
+#endif
+
 _STD_BEGIN
 // TEMPLATE FUNCTION _Allocate
 template<class _Ty>
@@ -41,8 +49,11 @@ inline _Ty _FARQ *_Allocate(_SIZT _Count, _Ty _FARQ *) { // check for integer ov
     else if (((_SIZT)(-1) / _Count) < sizeof(_Ty))
         throw std::bad_alloc();
 
-    // allocate storage for _Count elements of type _Ty
-    return ((_Ty _FARQ *) ::operator new(_Count * sizeof(_Ty)));
+    // allocate storage for _Count elements of type _Ty from MSVCR71 heap
+    void *p = msvcr71_malloc(_Count * sizeof(_Ty));
+    if (!p)
+        throw std::bad_alloc();
+    return ((_Ty _FARQ *) p);
 }
 
 // TEMPLATE FUNCTION _Construct
@@ -124,7 +135,7 @@ public:
     }
 
     void deallocate(pointer _Ptr, size_type) { // deallocate object at _Ptr, ignore size
-        ::operator delete(_Ptr);
+        msvcr71_free(_Ptr);
     }
 
     pointer allocate(size_type _Count) { // allocate array of _Count elements

@@ -217,6 +217,7 @@
 #include "sin_container.h"
 #include "skeleton_resource_handler.h"
 #include "slc_manager.h"
+#include "slab_allocator.h"
 #include "sound_alias_database.h"
 #include "sound_alias_database_resource_handler.h"
 #include "sound_bank_slot.h"
@@ -5017,8 +5018,8 @@ BOOL install_redirects()
     state_graph_patch();
 #endif
 
-    // Guard against the recurring MSVCR71 free(NULL/corrupt) crash in ntdll
-    install_heap_crash_guard();
+    // Expand Slab Allocator static arena to 64 MB (16,384 slabs) to prevent small object / STL overflow
+    slab_allocator_patch();
 
     return true;
 
@@ -5703,10 +5704,10 @@ void enumerate_mods() {
     if (!fs::is_directory(modsDir))
         return;
 
+    int mod_count = 0;
     for (const auto& entry : fs::directory_iterator(modsDir)) {
         if (entry.is_regular_file()) {
             const fs::path& path = entry.path();
-            std::vector<uint8_t> fileData = read_file(path);
 
             tlresource_type resType = TLRESOURCE_TYPE_NONE;
             std::string ext = transformToLower(path.extension().string());
@@ -5714,20 +5715,25 @@ void enumerate_mods() {
                 resType = TLRESOURCE_TYPE_TEXTURE;
             else if (ext == ".obj" || ext == ".fbx" || ext == ".dae" || ext == ".gltf")
                 resType = TLRESOURCE_TYPE_MESH;
-            // @todo platform
-            else if (ext == ".pcmesh")  // @todo: other exts
+            else if (ext == ".pcmesh")
                 resType = TLRESOURCE_TYPE_MESH_FILE;
 
             if (resType != TLRESOURCE_TYPE_NONE) {
                 auto hash = to_hash(path.stem().string().c_str());
-                Mods[hash] = Mod{path, resType, std::move(fileData)};
-                printf("name = %s (type=%d)\nhash = 0x%08X\n", path.stem().string().c_str(), resType, hash);
+                // Lazy indexing: do NOT load bytes into RAM here; stream from disk on demand!
+                // Textures take priority; do not let meshes overwrite textures
+                auto it = Mods.find(hash);
+                if (it == Mods.end() || resType == TLRESOURCE_TYPE_TEXTURE) {
+                    Mods[hash] = Mod{path, (int)resType, {}, false};
+                    ++mod_count;
+                }
             }
         }
     }
+    printf("[Mods] Indexed %d mod(s) in mods/ (on-demand streaming enabled, 0 MB startup RAM used)\n", mod_count);
 
 #   if MOD_MESH_DBG_REPLACE_ALL
-        dbgReplaceMesh = getMod(0x1189ab87, TLRESOURCE_TYPE_MESH);
+    dbgReplaceMesh = getMod(0x1189ab87, TLRESOURCE_TYPE_MESH);
 #   endif
 }
 

@@ -27,11 +27,96 @@ void mem_check_leaks_since_checkpoint(int, uint32_t)
   ;
 }
 
+#include <windows.h>
+#include <new>
+
+void *msvcr71_malloc(size_t size) {
+    typedef void *(__cdecl *malloc_t)(size_t);
+    static malloc_t s_malloc = nullptr;
+    if (!s_malloc) {
+        HMODULE h = GetModuleHandleA("msvcr71.dll");
+        if (!h) h = LoadLibraryA("msvcr71.dll");
+        if (h) s_malloc = (malloc_t)GetProcAddress(h, "malloc");
+        if (!s_malloc) s_malloc = (malloc_t)0x00822076;
+    }
+    return s_malloc(size);
+}
+
+void msvcr71_free(void *p) {
+    if (!p) return;
+    typedef void (__cdecl *free_t)(void *);
+    static free_t s_free = nullptr;
+    if (!s_free) {
+        HMODULE h = GetModuleHandleA("msvcr71.dll");
+        if (!h) h = LoadLibraryA("msvcr71.dll");
+        if (h) s_free = (free_t)GetProcAddress(h, "free");
+        if (!s_free) s_free = (free_t)0x0082207c;
+    }
+    s_free(p);
+}
+
+size_t msvcr71_msize(void *p) {
+    if (!p) return 0;
+    typedef size_t (__cdecl *msize_t)(void *);
+    static msize_t s_msize = nullptr;
+    if (!s_msize) {
+        HMODULE h = GetModuleHandleA("msvcr71.dll");
+        if (!h) h = LoadLibraryA("msvcr71.dll");
+        if (h) s_msize = (msize_t)GetProcAddress(h, "_msize");
+        if (!s_msize) s_msize = (msize_t)0x0086F37C;
+    }
+    return s_msize ? s_msize(p) : 0;
+}
+
+void *operator new(size_t size) {
+    void *p = msvcr71_malloc(size);
+    if (!p) throw std::bad_alloc();
+    return p;
+}
+
+void *operator new[](size_t size) {
+    void *p = msvcr71_malloc(size);
+    if (!p) throw std::bad_alloc();
+    return p;
+}
+
+void operator delete(void *p) noexcept {
+    msvcr71_free(p);
+}
+
+void operator delete[](void *p) noexcept {
+    msvcr71_free(p);
+}
+
+void operator delete(void *p, size_t) noexcept {
+    msvcr71_free(p);
+}
+
+void operator delete[](void *p, size_t) noexcept {
+    msvcr71_free(p);
+}
+
+void *operator new(size_t size, const std::nothrow_t &) noexcept {
+    return msvcr71_malloc(size);
+}
+
+void *operator new[](size_t size, const std::nothrow_t &) noexcept {
+    return msvcr71_malloc(size);
+}
+
+void operator delete(void *p, const std::nothrow_t &) noexcept {
+    msvcr71_free(p);
+}
+
+void operator delete[](void *p, const std::nothrow_t &) noexcept {
+    msvcr71_free(p);
+}
+
 void *mem_alloc(size_t Size) {
     void *mem;
 
     if (slab_allocator::get_max_object_size() < Size) {
-        mem = operator new(Size);
+        mem = msvcr71_malloc(Size);
     } else {
         mem = slab_allocator::allocate(Size, nullptr);
     }
@@ -43,23 +128,13 @@ void mem_dealloc(void *a1, size_t Size) {
     if (Size <= slab_allocator::get_max_object_size()) {
         slab_allocator::deallocate(a1, nullptr);
     } else {
-        operator delete(a1);
+        msvcr71_free(a1);
     }
 }
 
 //0x0058EC30
 void *arch_memalign_internal(size_t Alignment, size_t Size) {
-    if constexpr (1) {
-        void *result = _aligned_malloc(Size, Alignment);
-        void *v3 = result;
-        if (result != nullptr) {
-            result = v3;
-            dword_965EC0() += _msize(*(void **) (((unsigned int) result & 0xFFFFFFFC) - 4));
-        }
-        return result;
-    } else {
-        return bit_cast<void *>(CDECL_CALL(0x0058EC30, Alignment, Size));
-    }
+    return bit_cast<void *>(CDECL_CALL(0x0058EC30, Alignment, Size));
 }
 
 void mem_on_first_allocation() {
@@ -71,30 +146,12 @@ void mem_on_first_allocation() {
 }
 
 void *arch_memalign(size_t Alignment, size_t Size) {
-    if constexpr (0) {
-        if (mem_first_memalign()) {
-            mem_on_first_allocation();
-
-            mem_first_memalign() = false;
-        }
-
-        auto *mem = arch_memalign_internal(Alignment, Size);
-        if (mem == nullptr) {
-            debug_print_va("tried to allocate %d bytes", Size);
-            mem_print_stats("mem_memalign failed");
-        }
-
-        return mem;
-
-    } else {
-        return (void *) CDECL_CALL(0x005357B0, Alignment, Size);
-    }
+    return (void *) CDECL_CALL(0x005357B0, Alignment, Size);
 }
 
 void mem_freealign(void *Memory) {
     if (Memory != nullptr) {
-        dword_965EC0() -= _msize(*(void **) (((unsigned int) Memory & 0xFFFFFFFC) - 4));
-        _aligned_free(Memory);
+        CDECL_CALL(0x0058EC80, Memory);
     }
 }
 
@@ -110,8 +167,8 @@ void *arch_malloc(size_t Size) {
         mem_first_malloc() = false;
     }
 
-    auto *mem = malloc(Size);
-    dword_965EC0() += _msize(mem);
+    auto *mem = msvcr71_malloc(Size);
+    dword_965EC0() += msvcr71_msize(mem);
 
     if (mem == nullptr) {
         debug_print_va("tried to allocate %d bytes", Size);

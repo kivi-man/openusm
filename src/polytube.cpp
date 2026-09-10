@@ -170,12 +170,15 @@ void polytube::set_material(string_hash a2)
         this->field_D0 = nullptr;
     }
 
-    auto *mem = mem_alloc(sizeof(PCUV_ShaderMaterial));
     nglTexture *v5 = nglGetTexture(a2.source_hash_code);
-    auto *v4 = new (mem) PCUV_ShaderMaterial {v5, static_cast<nglBlendModeType>(2), 0, 72};
-    v4->field_1C = &v5->field_60;
-    v4->m_vtbl = 0x0087E698;
-    this->field_D0 = v4;
+    if (v5 != nullptr)
+    {
+        auto *mem = mem_alloc(sizeof(PCUV_ShaderMaterial));
+        auto *v4 = new (mem) PCUV_ShaderMaterial {v5, static_cast<nglBlendModeType>(2), 0, 72};
+        v4->field_1C = &v5->field_60;
+        v4->m_vtbl = 0x0087E698;
+        this->field_D0 = v4;
+    }
 }
 
 void polytube::set_material(PolytubeCustomMaterial *a2)

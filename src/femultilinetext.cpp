@@ -1,4 +1,5 @@
 #include "femultilinetext.h"
+#include "ps4_controller.h"
 
 #include "common.h"
 #include "fetextflashinfo.h"
@@ -16,9 +17,16 @@
 VALIDATE_OFFSET(FEMultiLineText, lines, 0x88);
 VALIDATE_SIZE(FEMultiLineText, 0xA0u);
 
-FEMultiLineText::FEMultiLineText()
+FEMultiLineText::FEMultiLineText() : FEText()
 {
-    THISCALL(0x00617470, this);
+    this->m_vtbl = 0x0087AE58;
+    this->field_68 = color32{0};
+    this->field_9C = false;
+    this->field_9D = false;
+    this->field_9E = false;
+    this->line_avail_num = 0;
+    this->lines = nullptr;
+    this->field_80 = 0;
 }
 
 FEMultiLineText::FEMultiLineText(font_index a2,
@@ -29,14 +37,16 @@ FEMultiLineText::FEMultiLineText(font_index a2,
                                  Float a8,
                                  int a9,
                                  int a10,
-                                 color32 a11) {
+                                 color32 a11)
+{
     THISCALL(0x00629250, this, a2, a4, a5, a6, a7, a8, a9, a10, a11);
 }
 
 void FEMultiLineText::Draw() {
-    if constexpr (0) {
-    } else {
-        THISCALL(0x0060A070, this);
+    if (this->IsShown()) {
+        int start_line = this->field_9C ? this->field_90 : 0;
+        int end_line = this->field_9C ? this->field_94 : this->field_80;
+        this->Draw(start_line, end_line);
     }
 }
 
@@ -130,9 +140,15 @@ void FEMultiLineText::SetButtonScale(Float a2) {
 }
 
 void FEMultiLineText::SetTextBox(global_text_enum a2, int a3, Float a4) {
-    //sp_log("FEMultiLineText::SetTextBox: %s", g_game_ptr->field_7C->field_0->field_0[a2]);
-
-    THISCALL(0x00618070, this, a2, a3, a4);
+    if (g_game_ptr != nullptr && g_game_ptr->field_7C != nullptr) {
+        const char *str = g_game_ptr->field_7C->lookup_localized_string(a2);
+        if (str != nullptr) {
+            FEMultiLineText::string s;
+            mString ms{str};
+            std::memcpy(&s, &ms, sizeof(mString));
+            this->SetTextBoxNoLocalize(s, a3, a4);
+        }
+    }
 }
 
 char *sub_609580(const char *a1, const char *a2, const char *a3) {
@@ -177,91 +193,101 @@ char *sub_609580(const char *a1, const char *a2, const char *a3) {
     }
 }
 
-void FEMultiLineText::sub_60A4A0(mString &a1) {
-    if (strchr(a1.c_str() , '~') != nullptr) {
-        std::string str{a1.c_str()};
-        auto *v2 = str.c_str();
-        //auto *v2 = static_cast<char *>(operator new(strlen(a1.c_str()) + 1));
-        //strcpy(v2, a1.c_str());
-        if (strstr(v2, "~cross")) {
-            auto *v3 = sub_609580(v2, "~cross", dword_965C24()[GamepadInput::Cross]);
-            v2 = v3;
-        }
+void __stdcall hook_sub_60A4A0(mString *a1) {
+    if (a1 == nullptr || a1->c_str() == nullptr) {
+        return;
+    }
 
-        if (strstr(v2, "~triangle")) {
-            auto *v4 = sub_609580(v2, "~triangle", dword_965C24()[GamepadInput::Triangle]);
-            v2 = v4;
-        }
+    std::string s(a1->c_str());
+    if (s.empty()) {
+        return;
+    }
 
-        if (strstr(v2, "~square")) {
-            auto *v5 = sub_609580(v2, "~square", dword_965C24()[GamepadInput::Square]);
-            v2 = v5;
-        }
+    bool ps4_active = ps4_controller::instance().is_ps4_active();
 
-        if (strstr(v2, "~circle")) {
-            auto *v6 = sub_609580(v2, "~circle", dword_965C24()[GamepadInput::Circle]);
-            v2 = v6;
-        }
+    if (ps4_active) {
+        auto replace_all = [&](const std::string &from, const std::string &to) {
+            size_t pos = 0;
+            while ((pos = s.find(from, pos)) != std::string::npos) {
+                s.replace(pos, from.length(), to);
+                pos += to.length();
+            }
+        };
 
-        if (strstr(v2, "~updown")) {
-            auto *v7 = sub_609580(v2, "~updown", "UP & DOWN");
-            v2 = v7;
-        }
+        // Convert PC keyboard prompt patterns into DualShock button codes
+        replace_all("[SPACE]", "~cross");
+        replace_all("[Space]", "~cross");
+        replace_all("[ENTER]", "~cross");
+        replace_all("[Enter]", "~cross");
+        replace_all("[ESC]", "~start");
+        replace_all("[Esc]", "~start");
+        replace_all("[TAB]", "~select");
+        replace_all("[Tab]", "~select");
+        replace_all("[LMB]", "~square");
+        replace_all("[RMB]", "~triangle");
+        replace_all("[Left Mouse Button]", "~square");
+        replace_all("[Right Mouse Button]", "~triangle");
+        replace_all("[E]", "~circle");
+        replace_all("[e]", "~circle");
+        replace_all("[Q]", "~l2");
+        replace_all("[q]", "~l2");
+        replace_all("[Left Shift]", "~r2");
+        replace_all("[LEFT SHIFT]", "~r2");
+        replace_all("[SHIFT]", "~r2");
+        replace_all("[Shift]", "~r2");
+        replace_all("[W,A,S,D]", "~stick_left");
+        replace_all("[WASD]", "~stick_left");
+        replace_all("ENTER:", "~cross");
+        replace_all("ESC:", "~triangle");
+        replace_all("SPACE:", "~cross");
+        replace_all("\"SPACE\"", "~cross");
+        replace_all("\"ENTER\"", "~cross");
+        replace_all("\"ESC\"", "~start");
+        replace_all("\"TAB\"", "~select");
 
-        if (strstr(v2, "~l2")) {
-            auto *v8 = sub_609580(v2, "~l2", dword_965C24()[GamepadInput::L2]);
-            v2 = v8;
-        }
+        // Preserve ~button tokens intact for MultiLineString
+        a1->update_guts(s.c_str(), -1);
+    } else {
+        auto replace_token = [&](const char *token, const char *rep) {
+            if (rep == nullptr) return;
+            size_t pos = 0;
+            std::string from(token);
+            std::string to(rep);
+            while ((pos = s.find(from, pos)) != std::string::npos) {
+                s.replace(pos, from.length(), to);
+                pos += to.length();
+            }
+        };
 
-        if (strstr(v2, "~r2")) {
-            auto *v9 = sub_609580(v2, "~r2", dword_965C24()[GamepadInput::R2]);
-            v2 = v9;
-        }
-
-        if (strstr(v2, "~r3")) {
-            auto *v10 = sub_609580(v2, "~r3", dword_965C24()[GamepadInput::R3]);
-            v2 = v10;
-        }
-
-        if (strstr(v2, "~both_lr")) {
+        replace_token("~cross", dword_965C24()[GamepadInput::Cross]);
+        replace_token("~triangle", dword_965C24()[GamepadInput::Triangle]);
+        replace_token("~square", dword_965C24()[GamepadInput::Square]);
+        replace_token("~circle", dword_965C24()[GamepadInput::Circle]);
+        replace_token("~updown", "UP & DOWN");
+        replace_token("~l2", dword_965C24()[GamepadInput::L2]);
+        replace_token("~r2", dword_965C24()[GamepadInput::R2]);
+        replace_token("~r3", dword_965C24()[GamepadInput::R3]);
+        if (s.find("~both_lr") != std::string::npos) {
             char Dest[256]{};
             sprintf(Dest,
                     "\"%s & %s\"",
                     dword_965C24()[GamepadInput::L2],
                     dword_965C24()[GamepadInput::R2]);
-            auto *v11 = sub_609580(v2, "~both_lr", Dest);
-            v2 = v11;
+            replace_token("~both_lr", Dest);
         }
+        replace_token("~right", dword_965C24()[GamepadInput::Right]);
+        replace_token("~select", dword_965C24()[GamepadInput::Select]);
+        replace_token("~forward", dword_965C24()[GamepadInput::Forward]);
+        replace_token("~left", dword_965C24()[GamepadInput::Left]);
+        replace_token("~start", dword_965C24()[GamepadInput::Start]);
 
-        if (strstr(v2, "~right")) {
-            auto *v12 = sub_609580(v2, "~r2", dword_965C24()[GamepadInput::Right]);
-            v2 = v12;
-        }
-
-        if (strstr(v2, "~select")) {
-            auto *v13 = sub_609580(v2, "~select", dword_965C24()[GamepadInput::Select]);
-            v2 = v13;
-        }
-
-        if (strstr(v2, "~forward")) {
-            auto *v14 = sub_609580(v2, "~forward", dword_965C24()[GamepadInput::Forward]);
-            v2 = v14;
-        }
-
-        if (strstr(v2, "~left")) {
-            auto *v15 = sub_609580(v2, "~left", dword_965C24()[GamepadInput::Left]);
-            v2 = v15;
-        }
-
-        if (strstr(v2, "~start")) {
-            auto *v16 = sub_609580(v2, "~start", dword_965C24()[GamepadInput::Start]);
-            v2 = v16;
-        }
-
-        a1.update_guts(v2, -1);
+        a1->update_guts(s.c_str(), -1);
     }
 }
 
+void FEMultiLineText::sub_60A4A0(mString &a1) {
+    hook_sub_60A4A0(&a1);
+}
 
 int FEMultiLineText::MakeBox(char *a2, int a3, int a4, Float a5, Float a6, bool a7)
 {
@@ -296,54 +322,28 @@ bool FEMultiLineText::CheckIfNotTooLong(int a2)
 }
 
 void FEMultiLineText::SetTextBoxNoLocalize(FEMultiLineText::string a2, int a7, Float a8) {
-    TRACE("FEMultiLineText::SetTextBoxNoLocalize");
-
-    assert(line_avail_num != 0);
-
-    if constexpr (0)
-    {
-        this->sub_60A4A0(*bit_cast<mString *>(&a2));
-        auto v12 = *bit_cast<mString *>(&a2);
-        auto v5 = FEMultiLineText::ReplaceEndlines(v12);
-        a2 = *bit_cast<string *>(&v5);
-        auto v6 = a7;
-        auto v7 = a8 == -1.f;
-        auto v8 = this->field_3C;
-        a7 = this->field_40;
-        this->field_7C = v6;
-        auto a5 = v8;
-        if ( !v7 )
-        {
-            a5 = a8;
-            a7 = a8;
-        }
-        
-        auto v9 = this->MakeBox(a2.guts, a2.m_size, v6, a5, a7, true);
-        if ( this->CheckIfNotTooLong(v9 - 1))
-            this->field_80 = v9;
-        else
-            this->field_80 = this->line_avail_num;
-
-        auto *v11 = this->lines->field_10.c_str();
-        this->SetTextNoLocalize( mString {v11});
-        this->AdjustForJustification();
-    }
-    else
-    {
-        THISCALL(0x00633AB0, this, a2, a7, a8);
-    }
+    THISCALL(0x00633AB0, this, a2, a7, a8);
 }
 
 void FEMultiLineText::SetTextAlloc(global_text_enum a2) {
-    sp_log("FEMultiLineText::SetTextAlloc: ");
-
-    THISCALL(0x006180B0, this, a2);
+    if (g_game_ptr != nullptr && g_game_ptr->field_7C != nullptr) {
+        const char *str = g_game_ptr->field_7C->lookup_localized_string(a2);
+        if (str != nullptr) {
+            this->SetTextAllocNoLocalize(str, -1);
+        }
+    }
 }
 
 void FEMultiLineText::SetText(global_text_enum a2) {
-    sp_log("FEMultiLineText::SetText: %s", g_game_ptr->field_7C->lookup_localized_string(a2));
-
-    THISCALL(0x00618030, this, a2);
+    if (g_game_ptr != nullptr && g_game_ptr->field_7C != nullptr) {
+        const char *str = g_game_ptr->field_7C->lookup_localized_string(a2);
+        if (str != nullptr) {
+            FEMultiLineText::string s;
+            mString ms{str};
+            std::memcpy(&s, &ms, sizeof(mString));
+            this->SetTextNoLocalize(s);
+        }
+    }
 }
 
 void FEMultiLineText::AdjustForJustification()
@@ -366,9 +366,12 @@ int FEMultiLineText::SetTextAllocNoLocalize(const char *a2, int a3) {
 }
 
 void FEMultiLineText::SetTextBoxAlloc(global_text_enum a1, int a3, Float a4) {
-    sp_log("FEMultiLineText::SetTextBoxAlloc:");
-
-    THISCALL(0x00618140, this, a1, a3, a4);
+    if (g_game_ptr != nullptr && g_game_ptr->field_7C != nullptr) {
+        const char *str = g_game_ptr->field_7C->lookup_localized_string(a1);
+        if (str != nullptr) {
+            this->SetTextBoxAllocNoLocalize(mString{str}, a3, a4);
+        }
+    }
 }
 
 void FEMultiLineText::SetTextBoxAllocNoLocalize(mString a2, int a6, Float a7) {
@@ -382,87 +385,17 @@ void FEMultiLineText::SetNumLines(int n) {
 
     assert(n != 0);
 
-    THISCALL(0x00617F30, this, n);
+    this->line_avail_num = n;
+    if (this->lines != nullptr) {
+        delete[] this->lines;
+        this->lines = nullptr;
+    }
+    this->field_80 = 0;
+    if (n > 0) {
+        this->lines = new MultiLineString[n];
+    }
 }
 
 void FEMultiLineText_patch() {
-
-    {
-        FUNC_ADDRESS(address, &FEMultiLineText::_get_mash_sizeof);
-        set_vfunc(0x0087AEA4, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &FEMultiLineText::AdjustForJustification);
-        REDIRECT(0x0062E878, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &FEMultiLineText::_unmash);
-        set_vfunc(0x0087AE5C, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &FEMultiLineText::_SetTextNoLocalize);
-        set_vfunc(0x0087AEE4, address);
-    }
-
-
-    {
-        FUNC_ADDRESS(address, &FEMultiLineText::SetTextBoxNoLocalize);
-        set_vfunc(0x0087AFA4, address);
-    }
-
-    return;
-
-    SET_JUMP(0x00609580, sub_609580);
-
-    if constexpr (0) {
-        {
-            FUNC_ADDRESS(address, &FEMultiLineText::SetText);
-            //set_vfunc(0x0087AEE0, address);
-        }
-
-        auto addr = 0x0087AFA0;
-
-        {
-            FUNC_ADDRESS(address, &FEMultiLineText::SetTextBox);
-            set_vfunc(addr, address);
-        }
-
-        addr += 0x4;
-
-        addr += 0x4;
-
-        {
-            FUNC_ADDRESS(address, &FEMultiLineText::SetTextAlloc);
-            set_vfunc(addr, address);
-        }
-
-        addr += 0x4;
-
-        {
-            FUNC_ADDRESS(address, &FEMultiLineText::SetTextAllocNoLocalize);
-            set_vfunc(addr, address);
-        }
-
-        addr += 0x4;
-
-        {
-            FUNC_ADDRESS(address, &FEMultiLineText::SetTextBoxAlloc);
-            set_vfunc(addr, address);
-        }
-
-        addr += 0x4;
-
-        {
-            FUNC_ADDRESS(address, &FEMultiLineText::SetTextBoxAllocNoLocalize);
-            set_vfunc(addr, address);
-        }
-
-        {
-            FUNC_ADDRESS(address, &MultiLineString::Draw);
-            REDIRECT(0x00617E5F, address);
-        }
-    }
+    SET_JUMP(0x0060A4A0, hook_sub_60A4A0);
 }

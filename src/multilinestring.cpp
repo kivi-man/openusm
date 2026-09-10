@@ -1,4 +1,5 @@
 #include "multilinestring.h"
+#include "ps4_controller.h"
 
 #include "common.h"
 #include "femanager.h"
@@ -9,6 +10,7 @@
 #include "trace.h"
 #include "variables.h"
 
+#include <string>
 #include <cassert>
 
 VALIDATE_SIZE(MultiLineString, 0x28);
@@ -20,54 +22,92 @@ MultiLineString::MultiLineString() {
 void MultiLineString::Set(MultiLineString::string a2, font_index a7, Float a8, Float a9) {
     TRACE("MultiLineString::Set");
 
-    if constexpr (0) {
-        std::memcpy(&this->field_10, &a2, sizeof(a2));
-        auto *v6 = &this->field_10;
+    std::string s(a2.guts != nullptr ? a2.guts : "");
+    if (ps4_controller::instance().is_ps4_active() && !s.empty()) {
+        auto replace_all = [&](const std::string &from, const std::string &to) {
+            size_t pos = 0;
+            while ((pos = s.find(from, pos)) != std::string::npos) {
+                s.replace(pos, from.length(), to);
+                pos += to.length();
+            }
+        };
 
-        this->m_font_index = a7;
+        replace_all("[SPACE]", "~cross");
+        replace_all("[Space]", "~cross");
+        replace_all("[ENTER]", "~cross");
+        replace_all("[Enter]", "~cross");
+        replace_all("[ESC]", "~start");
+        replace_all("[Esc]", "~start");
+        replace_all("[TAB]", "~select");
+        replace_all("[Tab]", "~select");
+        replace_all("[LMB]", "~square");
+        replace_all("[RMB]", "~triangle");
+        replace_all("[Left Mouse Button]", "~square");
+        replace_all("[Right Mouse Button]", "~triangle");
+        replace_all("[E]", "~circle");
+        replace_all("[e]", "~circle");
+        replace_all("[Q]", "~l2");
+        replace_all("[q]", "~l2");
+        replace_all("[Left Shift]", "~r2");
+        replace_all("[LEFT SHIFT]", "~r2");
+        replace_all("[SHIFT]", "~r2");
+        replace_all("[Shift]", "~r2");
+        replace_all("[W,A,S,D]", "~stick_left");
+        replace_all("[WASD]", "~stick_left");
+        replace_all("ENTER:", "~cross");
+        replace_all("ESC:", "~triangle");
+        replace_all("SPACE:", "~cross");
+        replace_all("\"SPACE\"", "~cross");
+        replace_all("\"ENTER\"", "~cross");
+        replace_all("\"ESC\"", "~start");
+        replace_all("\"TAB\"", "~select");
+    }
 
-        int v8 = 0;
+    mString v10_str{s.c_str()};
+    std::memcpy(&this->field_10, &v10_str, sizeof(v10_str));
+    auto *v6 = &this->field_10;
 
-        this->field_4 = {0, 0};
-        this->field_C = 0.0;
-        this->button_array_size = 0;
-        if (!this->field_10.empty()) {
-            do {
-                if (v8 < 0) {
-                    break;
-                }
-                v8 = v6->find({v8}, '~');
-                if (v8 >= 0) {
-                    this->button_array_size += 2;
-                    ++v8;
-                }
+    this->m_font_index = a7;
 
-            } while (this->field_10.m_size);
-        }
+    int v8 = 0;
 
-        if (this->button_array != nullptr) {
-            operator delete[](this->button_array);
-            this->button_array = nullptr;
-        }
+    this->field_4 = {0, 0};
+    this->field_C = 0.0;
+    this->button_array_size = 0;
+    if (!this->field_10.empty()) {
+        do {
+            if (v8 < 0) {
+                break;
+            }
+            v8 = v6->find({v8}, '~');
+            if (v8 >= 0) {
+                this->button_array_size += 2;
+                ++v8;
+            }
 
-        auto v9 = this->button_array_size;
-        if (v9 <= 0) {
-            auto *v12 = this->field_10.c_str();
+        } while (this->field_10.m_size);
+    }
 
-            mString v13{v12};
+    if (this->button_array != nullptr) {
+        operator delete[](this->button_array);
+        this->button_array = nullptr;
+    }
 
-            MultiLineString::string temp;
-            std::memcpy(&temp, &v13, sizeof(v13));
+    auto v9 = this->button_array_size;
+    if (v9 <= 0) {
+        auto *v12 = this->field_10.c_str();
 
-            this->field_C = MultiLineString::GetWidth(temp, a8, this->m_font_index);
-        } else {
-            auto *array = new button_t[v9];
+        mString v13{v12};
 
-            this->button_array = array;
-            this->ParseForButtons(a8, a9);
-        }
+        MultiLineString::string temp;
+        std::memcpy(&temp, &v13, sizeof(v13));
+
+        this->field_C = MultiLineString::GetWidth(temp, a8, this->m_font_index);
     } else {
-        THISCALL(0x0062E5E0, this, a2, a7, a8, a9);
+        auto *array = new button_t[v9];
+
+        this->button_array = array;
+        this->ParseForButtons(a8, a9);
     }
 }
 
@@ -194,17 +234,33 @@ int MultiLineString::ConvertStringToButtonCode(const char *a1, const char **a2, 
         return len;
     if (sub_609B80(a1, "~click_right_stick", a2, "5", &len))
         return len;
+    if (sub_609B80(a1, "~l3", a2, "4", &len))
+        return len;
+    if (sub_609B80(a1, "~r3", a2, "5", &len))
+        return len;
+    if (sub_609B80(a1, "~options", a2, "-", &len))
+        return len;
+    if (sub_609B80(a1, "~share", a2, "1", &len))
+        return len;
+    if (sub_609B80(a1, "~dpad_up", a2, ")", &len))
+        return len;
+    if (sub_609B80(a1, "~dpad_right", a2, "*", &len))
+        return len;
+    if (sub_609B80(a1, "~dpad_left", a2, "+", &len))
+        return len;
+    if (sub_609B80(a1, "~dpad_down", a2, ",", &len))
+        return len;
     if (sub_609B80(a1, "~registered", a2, "6", &len))
         return len;
     if (sub_609B80(a1, "~copy_right", a2, "7", &len))
         return len;
 
-    if (!sub_609B80(a1, "~at_character", a2, "8", &len)) {
-        auto *v4 = a3.c_str();
-        sp_log("Incorrect button code %s found in %s\n", a1, v4);
-
-        assert(0);
+    if (sub_609B80(a1, "~at_character", a2, "8", &len)) {
+        return len;
     }
+
+    // Default fallback: return 0 without crash
+    return 0;
 
     return len;
 }
@@ -341,16 +397,12 @@ int MultiLineString::ParseForButtons(Float a3, Float a4) {
 }
 
 void MultiLineString_patch() {
-    FUNC_ADDRESS(address, &MultiLineString::Set);
-    REDIRECT(0x0062E809, address);
-    //REDIRECT(0x0062EA41, address);
-    //REDIRECT(0x0062ECFC, address);
-    //REDIRECT(0x0062ED98, address);
-
     {
-        FUNC_ADDRESS(address, &MultiLineString::ParseForButtons);
-        REDIRECT(0x0062E6B0, address);
+        FUNC_ADDRESS(address, &MultiLineString::Set);
+        SET_JUMP(0x0062E5E0, address);
     }
-
-    REDIRECT(0x0062E6D1, MultiLineString::GetWidth);
+    {
+        FUNC_ADDRESS(draw_addr, &MultiLineString::Draw);
+        SET_JUMP(0x00617960, draw_addr);
+    }
 }

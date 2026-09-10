@@ -599,37 +599,22 @@ int mission_manager::sub_5C5BD0() const
     return 1;
 }
 
+__attribute__((naked)) static void safe_add_district_table_shim() {
+    __asm__ __volatile__(
+        ".byte 0x83, 0x79, 0x38, 0x08\n"       // cmpl $8, 0x38(%ecx)
+        ".byte 0x7D, 0x07\n"                   // jge skip
+        ".byte 0xB8, 0xE0, 0x1E, 0x5D, 0x00\n" // mov $0x005D1EE0, %eax
+        ".byte 0xFF, 0xE0\n"                   // jmp *%eax
+        // skip:
+        ".byte 0xC2, 0x08, 0x00\n"             // ret $8
+    );
+}
+
+
 void mission_manager_patch()
 {
-    {
-        FUNC_ADDRESS(address, &mission_manager::load_script);
-        REDIRECT(0x005E1B1F, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &mission_manager::run_script);
-        REDIRECT(0x005E1A96, address);
-        REDIRECT(0x005E1B2B, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &mission_manager::show_mission_loading_panel);
-        REDIRECT(0x005DEF4C, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &mission_manager::unload_script_if_requested);
-        REDIRECT(0x005DBE99, address);
-        REDIRECT(0x005E1A65, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &mission_manager::frame_advance);
-        REDIRECT(0x0055D75B, address);
-    }
-
-    {
-        FUNC_ADDRESS(address, &mission_manager::kill_braindead_script);
-        SET_JUMP(0x005D7EF0, address);
-    }
+    REDIRECT(0x0055C2E8, safe_add_district_table_shim);
 }
+
+
+
