@@ -56,7 +56,7 @@ Files are matched to game assets by filename hash. No pak repacking required.
 
 ## Requirements
 
-- Ultimate Spider-Man (PC) original copy required
+- Ultimate Spider-Man (PC)
 - Windows 10 or later (64-bit host, 32-bit game process)
 - To build: WSL2 with Ubuntu, MinGW-w64 i686 cross-compiler
 
