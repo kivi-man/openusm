@@ -476,6 +476,23 @@ region *region::get_neighbor(int neighbor_index) const
     return the_terrain->get_region(v4);
 }
 
+__attribute__((naked, noinline)) static void safe_neighbor_regions_guard()
+{
+    __asm__ __volatile__(
+        ".byte 0x8B, 0x94, 0x24, 0xB4, 0x00, 0x00, 0x00\n" // mov edx, dword ptr [esp + 0xb4]
+        ".byte 0x83, 0xFA, 0x20\n"                         // cmp edx, 32
+        ".byte 0x7D, 0x0A\n"                               // jge skip (+10 bytes to push 0x0053BA7B)
+        // Normal path (count < 32):
+        ".byte 0x31, 0xC9\n"                               // xor ecx, ecx
+        ".byte 0x85, 0xD2\n"                               // test edx, edx
+        ".byte 0x68, 0xF2, 0xB9, 0x53, 0x00\n"             // push 0x0053B9F2
+        ".byte 0xC3\n"                                     // ret (near jump to 0x0053B9F2)
+        // skip label (count >= 32):
+        ".byte 0x68, 0x7B, 0xBA, 0x53, 0x00\n"             // push 0x0053BA7B
+        ".byte 0xC3\n"                                     // ret (near jump to 0x0053BA7B)
+    );
+}
+
 void region_patch()
 {
     // Prevent crash at 0x005454B7 when this->region_entities is null
@@ -493,6 +510,19 @@ void region_patch()
         VirtualProtect((void *)0x0055544C, 4, PAGE_EXECUTE_READWRITE, &oldProtect);
         *(uint32_t *)0x0055544C = 128;
         VirtualProtect((void *)0x0055544C, 4, oldProtect, &oldProtect);
+    }
+
+    // Guard unique neighbor regions stack buffer (capacity 32) at 0x0053B9E7
+    // Caps neighbor regions array at 32, preventing stack buffer overflow,
+    // stack count corruption, thread stack walk crash at 0x0053B9F4, and SIMD table overflow.
+    {
+        DWORD oldProtect;
+        VirtualProtect((void *)0x0053B9E7, 7, PAGE_EXECUTE_READWRITE, &oldProtect);
+        uint8_t patch_bytes[7] = { 0xE9, 0, 0, 0, 0, 0x90, 0x90 };
+        uint32_t rel_offset = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(safe_neighbor_regions_guard)) - 0x0053B9E7 - 5;
+        memcpy(&patch_bytes[1], &rel_offset, 4);
+        memcpy((void *)0x0053B9E7, patch_bytes, 7);
+        VirtualProtect((void *)0x0053B9E7, 7, oldProtect, &oldProtect);
     }
 
     {
